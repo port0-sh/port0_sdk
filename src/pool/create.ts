@@ -16,7 +16,6 @@ import {
   NoteScriptFee,
   Package,
   StorageSlot,
-  TransactionRequestBuilder,
   type MidenClient,
   type TransactionSubmitResult,
 } from "@miden-sdk/miden-sdk";
@@ -95,26 +94,28 @@ export async function createPoolAccount(
 }
 
 export interface DeployOptions {
-  /** Poll `transactions.waitFor` until the deploy transaction is confirmed. */
+  /** Poll until the deploy transaction is confirmed. */
   waitForConfirmation?: boolean;
 }
 
 /**
- * Deploys a network-account pool with a scriptless (empty) transaction. The
- * network auth forbids tx scripts and bumps the nonce itself, so an empty
- * request is sufficient to commit the account on-chain.
+ * Deploys a network-account pool by consuming a funding note as its first
+ * transaction. The 0.17 network auth rejects transactions with no effect, so
+ * an empty scriptless transaction no longer commits the account; consuming an
+ * input note both commits the account and pays its first transaction fee from
+ * the received funds.
  */
 export async function deployPoolAccount(
   client: MidenClient,
   poolId: AccountId,
+  fundingNoteId: string,
   options?: DeployOptions,
 ): Promise<TransactionSubmitResult> {
-  const request = new TransactionRequestBuilder().build();
-  const result = await client.transactions.submit(poolId, request);
-  if (options?.waitForConfirmation) {
-    await client.transactions.waitFor(result.txId);
-  }
-  return result;
+  return client.transactions.consume({
+    account: poolId.toString(),
+    notes: [fundingNoteId],
+    waitForConfirmation: options?.waitForConfirmation ?? false,
+  });
 }
 
 export interface FeeFaucetParams {

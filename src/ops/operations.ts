@@ -148,9 +148,12 @@ export function swap(
     tag: params.tag,
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "swap");
-  const request = ownOutputNotesRequest([note, sponsorNote]);
-
   return (async () => {
+    const request = await ownOutputNotesRequest(
+      client,
+      [note, sponsorNote],
+      config.poolId,
+    );
     await submitIfRequested(client, params.sender, request, options);
     return {
       note,
@@ -212,9 +215,12 @@ export function addLiquidity(
     tag: params.tag,
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "mint");
-  const request = ownOutputNotesRequest([note, sponsorNote]);
-
   return (async () => {
+    const request = await ownOutputNotesRequest(
+      client,
+      [note, sponsorNote],
+      config.poolId,
+    );
     await submitIfRequested(client, params.sender, request, options);
     return {
       note,
@@ -274,9 +280,12 @@ export function removeLiquidity(
     tag: params.tag,
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "burn");
-  const request = ownOutputNotesRequest([note, sponsorNote]);
-
   return (async () => {
+    const request = await ownOutputNotesRequest(
+      client,
+      [note, sponsorNote],
+      config.poolId,
+    );
     await submitIfRequested(client, params.sender, request, options);
     return {
       note,
@@ -311,9 +320,12 @@ export function collectFees(
     serial: params.serial,
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "collect");
-  const request = ownOutputNotesRequest([note, sponsorNote]);
-
   return (async () => {
+    const request = await ownOutputNotesRequest(
+      client,
+      [note, sponsorNote],
+      config.poolId,
+    );
     await submitIfRequested(client, params.sender, request, options);
     return {
       note,
@@ -349,9 +361,12 @@ export function configure(
     protocolFeeBps: params.protocolFeeBps,
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "admin");
-  const request = ownOutputNotesRequest([note, sponsorNote]);
-
   return (async () => {
+    const request = await ownOutputNotesRequest(
+      client,
+      [note, sponsorNote],
+      config.poolId,
+    );
     await submitIfRequested(client, params.sender, request, options);
     return {
       note,

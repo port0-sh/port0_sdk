@@ -30,7 +30,8 @@ const ZERO: Word4 = [0n, 0n, 0n, 0n];
 export interface PoolFees {
   lpFeeBps: bigint;
   protocolFeeBps: bigint;
-  feeTo: AccountId;
+  /** Null until `configure` has written the fees slot. */
+  feeTo: AccountId | null;
 }
 
 export interface PoolState {
@@ -87,7 +88,8 @@ export function decodePoolState(account: Account): PoolState {
 
   const lpKey = readWord(storage, POOL_SLOTS.tokenlpAssetKey) ?? ZERO;
   const lpSupply = decodeScalarWord(readWord(storage, POOL_SLOTS.lpSupply) ?? ZERO);
-  const fees = decodeFeesWord(readWord(storage, POOL_SLOTS.fees) ?? ZERO);
+  const feesWord = readWord(storage, POOL_SLOTS.fees) ?? ZERO;
+  const fees = decodeFeesWord(feesWord);
   const admin = decodeAdminWord(readWord(storage, POOL_SLOTS.admin) ?? ZERO);
   const p2idRoot = readWord(storage, POOL_SLOTS.p2idRoot) ?? ZERO;
   const pot = decodeProtocolPotWord(
@@ -128,7 +130,10 @@ export function decodePoolState(account: Account): PoolState {
     fees: {
       lpFeeBps: fees.lpFeeBps,
       protocolFeeBps: fees.protocolFeeBps,
-      feeTo: accountIdFromFelts(fees.feeTo),
+      feeTo:
+        fees.feeTo[0] === 0n && fees.feeTo[1] === 0n
+          ? null
+          : accountIdFromFelts(fees.feeTo),
     },
     admin: accountIdFromFelts(admin),
     p2idRoot,

@@ -52,9 +52,10 @@ export class XykClient {
 
   deployPoolAccount(
     poolId: AccountId,
+    fundingNoteId: string,
     options?: DeployOptions,
   ): ReturnType<typeof deployPoolAccount> {
-    return deployPoolAccount(this.client, poolId, options);
+    return deployPoolAccount(this.client, poolId, fundingNoteId, options);
   }
 
   createFeeFaucet(params: FeeFaucetParams): Promise<Account> {

@@ -4,6 +4,7 @@
   "description": "TypeScript SDK for the MidenXYK constant-product AMM. Builds XYK network notes, fee sponsorships, quotes, pool reads, and pool operations on top of @miden-sdk/miden-sdk.",
   "type": "module",
   "license": "MIT",
+  "sideEffects": false,
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,8 +16,24 @@
     }
   },
   "files": [
-    "dist",
-    "src/generated"
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "rad://z36yP8bg7ivZT6ZnnUyAvRTZvisL9"
+  },
+  "author": "mico <mic0@mic0.dev>",
+  "keywords": [
+    "miden",
+    "amm",
+    "dex",
+    "xyk",
+    "constant-product",
+    "uniswap-v2",
+    "typescript"
   ],
   "scripts": {
     "generate": "node scripts/export-contracts.mjs",
@@ -25,12 +42,14 @@
     "test": "vitest run",
     "test:wasm": "npm run build && node test/wasm-smoke.mjs",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
-  "dependencies": {
-    "@miden-sdk/miden-sdk": "0.17.0"
+  "peerDependencies": {
+    "@miden-sdk/miden-sdk": "^0.17.0"
   },
   "devDependencies": {
+    "@miden-sdk/miden-sdk": "0.17.1",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.0",
     "typescript": "^5.5.0",
