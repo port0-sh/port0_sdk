@@ -7,16 +7,16 @@
  * a network account whose note-script allowlist contains every XYK note root.
  */
 import type { Account, AccountId } from "@miden-sdk/miden-sdk";
-import { NOTE_KINDS, noteScript } from "../notes/scripts.js";
+import { POOL_NOTE_KINDS, noteScript } from "../notes/scripts.js";
 
 /** The XYK note script roots, keyed by kind, as lowercase hex. */
 export function xykNoteScriptRoots(): Record<
-  (typeof NOTE_KINDS)[number],
+  (typeof POOL_NOTE_KINDS)[number],
   string
 > {
   return Object.fromEntries(
-    NOTE_KINDS.map((kind) => [kind, noteScript(kind).root().toHex()]),
-  ) as Record<(typeof NOTE_KINDS)[number], string>;
+    POOL_NOTE_KINDS.map((kind) => [kind, noteScript(kind).root().toHex()]),
+  ) as Record<(typeof POOL_NOTE_KINDS)[number], string>;
 }
 
 /** True when `account` is a network account allowlisting all five XYK notes. */
@@ -27,7 +27,7 @@ export function isXykPool(account: Account): boolean {
   const allowlist = new Set(
     (account.networkNoteAllowlist() ?? []).map((root) => root.toHex()),
   );
-  return NOTE_KINDS.every((kind) => allowlist.has(noteScript(kind).root().toHex()));
+  return POOL_NOTE_KINDS.every((kind) => allowlist.has(noteScript(kind).root().toHex()));
 }
 
 /** A local, caller-maintained pool id registry. */

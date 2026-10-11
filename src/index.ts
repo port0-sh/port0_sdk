@@ -14,10 +14,12 @@ export * from "./pool/decoding.js";
 export * from "./pool/reads.js";
 export * from "./pool/slots.js";
 export * from "./pool/create.js";
+export * from "./pool/registry.js";
 export * from "./pool/config.js";
 export * from "./ops/helpers.js";
 export * from "./ops/operations.js";
 export * from "./pool/discovery.js";
+export * from "./pool/registry.js";
 export * from "./client.js";
 export {
   CONTRACT_ARTIFACTS,

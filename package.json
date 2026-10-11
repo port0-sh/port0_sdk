@@ -41,6 +41,8 @@
     "build": "tsup",
     "test": "vitest run",
     "test:wasm": "npm run build && node test/wasm-smoke.mjs",
+    "pool:commitment": "npm run build && node scripts/pool-code-commitment.mjs",
+    "registry:deploy": "npm run build && node scripts/deploy-registry.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"

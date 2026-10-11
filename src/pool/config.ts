@@ -1,5 +1,5 @@
 import type { AccountId } from "@miden-sdk/miden-sdk";
-import type { NoteKind } from "../notes/scripts.js";
+import type { PoolNoteKind } from "../notes/scripts.js";
 import type { PoolNoteFees } from "./create.js";
 
 /**
@@ -18,6 +18,6 @@ export interface PoolConfig {
 export const DEFAULT_DEADLINE_MARGIN_SECONDS = 3600n;
 
 /** The consumption fee for a note kind, defaulting to zero. */
-export function noteFee(noteFees: PoolNoteFees, kind: NoteKind): bigint {
+export function noteFee(noteFees: PoolNoteFees, kind: PoolNoteKind): bigint {
   return noteFees[kind] ?? 0n;
 }

@@ -17,9 +17,11 @@ export function contractPackageBytes(kind: ContractKind): Uint8Array {
 /** Every contract kind the SDK ships as a compiled package. */
 export const CONTRACT_KINDS: readonly ContractKind[] = [
   "pool",
-  "admin",
+  "registry",
   "mint",
   "burn",
   "swap",
   "collect",
+  "registry-collect",
+  "register",
 ] as const;

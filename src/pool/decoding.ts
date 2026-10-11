@@ -8,21 +8,27 @@
  */
 import type { Word4 } from "../math/encoding.js";
 
-/** `fees` word: `[lp_fee_bps, protocol_fee_bps, fee_to.prefix, fee_to.suffix]`. */
+/**
+ * `fees` word: `[lp_fee_bps, protocol_fee_share_bps, 0, 0]`.
+ *
+ * The protocol's fee destination is not here: it lives on the registry, and a
+ * pool reads it only when it collects.
+ */
 export function decodeFeesWord(word: Word4): {
   lpFeeBps: bigint;
-  protocolFeeBps: bigint;
-  feeTo: [bigint, bigint]; // [prefix, suffix]
+  protocolFeeShareBps: bigint;
 } {
   return {
     lpFeeBps: word[0],
-    protocolFeeBps: word[1],
-    feeTo: [word[2], word[3]],
+    protocolFeeShareBps: word[1],
   };
 }
 
-/** `admin` word: `[0, 0, suffix, prefix]`. Returns `[prefix, suffix]`. */
-export function decodeAdminWord(word: Word4): [bigint, bigint] {
+/**
+ * An account id stored as `[0, 0, suffix, prefix]`, the layout the contract
+ * uses for `registry_id`. Returns `[prefix, suffix]`.
+ */
+export function decodeAccountIdWord(word: Word4): [bigint, bigint] {
   return [word[3], word[2]];
 }
 

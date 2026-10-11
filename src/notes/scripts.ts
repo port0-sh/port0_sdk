@@ -8,16 +8,25 @@
 import { NoteScript, Package } from "@miden-sdk/miden-sdk";
 import { contractPackageBytes } from "../artifacts.js";
 
-/** The five note packages shipped by the SDK. */
-export type NoteKind = "admin" | "mint" | "burn" | "swap" | "collect";
+/** The five note packages the pool itself consumes. */
+export type PoolNoteKind = "mint" | "burn" | "swap" | "collect";
 
-/** Every note kind, in a stable order. */
-export const NOTE_KINDS: readonly NoteKind[] = [
-  "admin",
+/** Every note script the SDK ships. */
+export type NoteKind = PoolNoteKind | "register" | "registry-collect";
+
+/** The notes a pool allowlists, in a stable order. */
+export const POOL_NOTE_KINDS: readonly PoolNoteKind[] = [
   "mint",
   "burn",
   "swap",
   "collect",
+] as const;
+
+/** Every note kind, in a stable order. */
+export const NOTE_KINDS: readonly NoteKind[] = [
+  ...POOL_NOTE_KINDS,
+  "register",
+  "registry-collect",
 ] as const;
 
 const cache = new Map<NoteKind, NoteScript>();

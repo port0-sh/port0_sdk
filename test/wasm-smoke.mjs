@@ -14,19 +14,26 @@ import {
   StorageSlot,
 } from "@miden-sdk/miden-sdk";
 import {
-  buildAdminNote,
+  buildRegistryCollectNote,
   buildBurnNote,
   buildCollectNote,
   buildFeeSponsorshipNote,
   buildMintNote,
+  buildPoolAccount,
+  buildRegisterNote,
   buildSwapNote,
   contractPackageBytes,
+  createRegistryAccount,
   featureNoteIdWord,
   feeSponsorshipStorage,
+  fungibleAssetIdWord,
   noteScript,
   NOTE_KINDS,
   ownOutputNotesRequest,
+  poolCodeCommitment,
   poolInitSlots,
+  readRegistryAcceptedCodeCommitments,
+  registerNoteStorage,
   wasmModule,
   wordFromWord4,
 } from "../dist/index.js";
@@ -71,14 +78,17 @@ for (const kind of NOTE_KINDS) {
   assert.notEqual(noteScript(kind).root().toHex(), ZERO_WORD, `${kind} root`);
 }
 
-// Pool component builds from the pool package and the 11 slots.
+// Pool component builds from the pool package and the 10 slots.
 const poolPkg = Package.deserialize(contractPackageBytes("pool"));
 const { StorageSlotArray } = wasmModule();
 const slotArray = new StorageSlotArray(
   poolInitSlots({
     token0Key: [1n, 2n, 3n, 4n],
     token1Key: [5n, 6n, 7n, 8n],
-    admin: sender,
+    registryId: sender,
+    lpFeeBps: 30n,
+    protocolFeeShareBps: 10n,
+    p2idRoot: [9n, 10n, 11n, 12n],
   }).map((def) =>
     def.value === null
       ? StorageSlot.emptyValue(def.name)
@@ -137,19 +147,16 @@ const collect = buildCollectNote({ sender, poolId: sender });
 assert.equal(collect.isNetworkNote(), true);
 assert.equal(collect.assets().fungibleAssets().length, 0);
 
-// Admin note: 14-felt storage.
-const admin = buildAdminNote({
+// Registry collect note: 10-felt storage, no assets, permissionless.
+const registryCollect = buildRegistryCollectNote({
   sender,
-  poolId: sender,
-  feeTo: sender,
-  lpFeeBps: 30n,
-  protocolFeeBps: 10n,
+  registryId: sender,
+  assetKey: [1n, 2n, 3n, 4n],
 });
-assert.equal(admin.isNetworkNote(), true);
-const adminItems = admin.recipient().storage().items();
-assert.equal(adminItems.length, 14);
-assert.equal(adminItems[4].asInt(), 30n);
-assert.equal(adminItems[5].asInt(), 10n);
+assert.equal(registryCollect.isNetworkNote(), true);
+const collectItems = registryCollect.recipient().storage().items();
+assert.equal(collectItems.length, 10);
+assert.equal(collectItems[2].asInt(), 1n);
 
 // Fee sponsorship note: bound to the swap note id, one fee asset.
 const sponsor = buildFeeSponsorshipNote({
@@ -172,7 +179,72 @@ const expectedSponsor = feeSponsorshipStorage({
 assert.deepEqual(sponsorItems, expectedSponsor);
 
 // Two-note own-output request assembles.
-const request = ownOutputNotesRequest([swap, sponsor]);
+const request = await ownOutputNotesRequest(client, [swap, sponsor], sender);
 assert.ok(request);
+
+// Register note: 8-felt storage, no assets, network note.
+const register = buildRegisterNote({
+  sender,
+  registryId: sender,
+  poolId: sender,
+  asset0: token0,
+  asset1: token1,
+});
+assert.equal(register.isNetworkNote(), true);
+assert.equal(register.script().root().toHex(), noteScript("register").root().toHex());
+assert.equal(register.assets().fungibleAssets().length, 0);
+assert.deepEqual(
+  register.recipient().storage().items().map((f) => f.asInt()),
+  registerNoteStorage({
+    registryId: sender,
+    poolId: sender,
+    asset0: token0,
+    asset1: token1,
+  }),
+);
+
+// Pool account builds with CodeInspection installed and exposes a code
+// commitment. The commitment is over the code only, so it does not depend on
+// the seed or the storage values.
+const poolParams = {
+  token0Key: fungibleAssetIdWord(token0),
+  token1Key: fungibleAssetIdWord(token1),
+  registryId: sender,
+  lpFeeBps: 30n,
+  protocolFeeShareBps: 10n,
+  feeFaucetId: feeFaucet,
+};
+const poolAccount = await buildPoolAccount(client, poolParams);
+const commitment = poolAccount.code().commitment().toHex();
+assert.match(commitment, /^0x[0-9a-f]{64}$/);
+const stableCommitment = await poolCodeCommitment(client, poolParams);
+assert.equal(
+  stableCommitment,
+  commitment,
+  "code commitment must not depend on the account seed",
+);
+console.log("pool code commitment:", commitment);
+
+// Registry account builds as a network account with the accepted pool code
+// commitment seeded and the register note allowlisted.
+const registryAccount = await createRegistryAccount(client, {
+  acceptedPoolCodeCommitment: commitment,
+  feeFaucetId: feeFaucet,
+  registerFee: 133n,
+  protocolFeeTo: sender,
+  protocolFeeShareBps: 10n,
+  allowedLpFeeBps: [5n, 30n, 100n],
+  p2idRoot: [9n, 10n, 11n, 12n],
+});
+assert.equal(registryAccount.isNetworkAccount(), true);
+const accepted = await readRegistryAcceptedCodeCommitments(
+  (id) => client.accounts.get(id),
+  registryAccount.id(),
+);
+assert.equal(accepted.length, 1);
+const expectedLimbs = Array.from(
+  wasmModule().Word.fromHex(commitment).toU64s(),
+);
+assert.deepEqual([...accepted[0]], expectedLimbs);
 
 console.log("wasm-smoke: ok");

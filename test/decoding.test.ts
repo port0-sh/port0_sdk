@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assetKeyToFaucetIdFelts,
-  decodeAdminWord,
+  decodeAccountIdWord,
   decodeFeesWord,
   decodeProtocolPotWord,
   decodeScalarWord,
@@ -11,15 +11,15 @@ import {
 
 describe("pool storage word decoders", () => {
   it("decodes the fees word", () => {
-    expect(decodeFeesWord([30n, 10n, 0xc1n, 0xc2n])).toEqual({
+    // The fee recipient is not in this word any more: the registry holds it.
+    expect(decodeFeesWord([30n, 10n, 0n, 0n])).toEqual({
       lpFeeBps: 30n,
-      protocolFeeBps: 10n,
-      feeTo: [0xc1n, 0xc2n], // [prefix, suffix]
+      protocolFeeShareBps: 10n,
     });
   });
 
-  it("decodes the admin word [0,0,suffix,prefix]", () => {
-    expect(decodeAdminWord([0n, 0n, 0xa2n, 0xa1n])).toEqual([0xa1n, 0xa2n]);
+  it("decodes an account id word [0,0,suffix,prefix]", () => {
+    expect(decodeAccountIdWord([0n, 0n, 0xa2n, 0xa1n])).toEqual([0xa1n, 0xa2n]);
   });
 
   it("decodes scalar words [value,0,0,0]", () => {

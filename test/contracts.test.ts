@@ -34,19 +34,18 @@ describe("pool constants", () => {
     expect(FEE_DENOMINATOR).toBe(10_000n);
   });
 
-  it("declares the 11 pool storage slot names", () => {
+  it("declares the 10 pool storage slot names", () => {
     expect(Object.values(POOL_SLOTS)).toEqual([
-      "miden_xyk::miden_xyk::tokenlp_asset_key",
       "miden_xyk::miden_xyk::token0_asset_key",
       "miden_xyk::miden_xyk::token1_asset_key",
       "miden_xyk::miden_xyk::lp_supply",
       "miden_xyk::miden_xyk::fees",
-      "miden_xyk::miden_xyk::admin",
       "miden_xyk::miden_xyk::p2id_root",
       "miden_xyk::miden_xyk::protocol_pot",
       "miden_xyk::miden_xyk::price0_cumulative_last",
       "miden_xyk::miden_xyk::price1_cumulative_last",
       "miden_xyk::miden_xyk::block_timestamp_last",
+      "miden_xyk::miden_xyk::registry_id",
     ]);
   });
 });

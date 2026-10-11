@@ -62,23 +62,36 @@ export function collectNoteStorage(serial: SerialNumber): bigint[] {
   return [...serial];
 }
 
-/** admin-note: 14 felts. No assets. */
-export interface AdminNoteParams {
-  poolId: AccountIdLike;
-  feeTo: AccountIdLike;
-  lpFeeBps: bigint;
-  protocolFeeBps: bigint;
-  p2idRoot: Word4;
-  lpKey: Word4;
+/** registry-collect-note: 10 felts. No assets. */
+export interface RegistryCollectNoteParams {
+  registryId: AccountIdLike;
+  assetKey: Word4;
+  serial: Word4;
 }
 
-export function adminNoteStorage(params: AdminNoteParams): bigint[] {
+export function registryCollectNoteStorage(
+  params: RegistryCollectNoteParams,
+): bigint[] {
   return [
+    ...accountIdFelts(params.registryId),
+    ...params.assetKey,
+    ...params.serial,
+  ];
+}
+
+/** register-note: 8 felts. No assets. */
+export interface RegisterNoteParams {
+  registryId: AccountIdLike;
+  poolId: AccountIdLike;
+  asset0: AccountIdLike;
+  asset1: AccountIdLike;
+}
+
+export function registerNoteStorage(params: RegisterNoteParams): bigint[] {
+  return [
+    ...accountIdFelts(params.registryId),
     ...accountIdFelts(params.poolId),
-    ...accountIdFelts(params.feeTo),
-    params.lpFeeBps,
-    params.protocolFeeBps,
-    ...params.p2idRoot,
-    ...params.lpKey,
+    ...accountIdFelts(params.asset0),
+    ...accountIdFelts(params.asset1),
   ];
 }

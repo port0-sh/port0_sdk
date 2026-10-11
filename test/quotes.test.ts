@@ -12,7 +12,7 @@ import {
 import { MAX_AMOUNT, MINIMUM_LIQUIDITY } from "../src/constants.js";
 
 const LP_FEE_BPS = 30n;
-const PROTOCOL_FEE_BPS = 10n;
+const PROTOCOL_FEE_SHARE_BPS = 1200n;
 
 /** Thrown kind, or null when the call succeeds. */
 function thrownKind(fn: () => unknown): PoolMathErrorKind | null {
@@ -33,22 +33,22 @@ function refAmountOut(
   reserveIn: bigint,
   reserveOut: bigint,
   lpFeeBps: bigint,
-  protocolFeeBps: bigint,
+  protocolFeeShareBps: bigint,
 ): SwapQuote {
   if (amountIn === 0n) throw new PoolMathError("ZeroAmountIn");
   if (reserveIn === 0n || reserveOut === 0n) throw new PoolMathError("EmptyPool");
   if (amountIn > MAX_AMOUNT || reserveIn > MAX_AMOUNT || reserveOut > MAX_AMOUNT) {
     throw new PoolMathError("Overflow");
   }
-  const protocolFee = (protocolFeeBps * amountIn) / 10_000n;
-  const lpAmount = amountIn - protocolFee;
-  const amountInWithFee = lpAmount * (10_000n - lpFeeBps);
+  const lpFee = (lpFeeBps * amountIn) / 10_000n;
+  const protocolFee = (protocolFeeShareBps * lpFee) / 10_000n;
+  const amountInWithFee = amountIn * (10_000n - lpFeeBps);
   const out =
     (amountInWithFee * reserveOut) /
     (reserveIn * 10_000n + amountInWithFee);
   if (out === 0n) throw new PoolMathError("ZeroAmountOut");
   if (out >= reserveOut) throw new PoolMathError("InsufficientLiquidity");
-  const reserveInAfter = reserveIn + lpAmount;
+  const reserveInAfter = reserveIn + (amountIn - protocolFee);
   if (reserveInAfter >= MAX_AMOUNT) throw new PoolMathError("Overflow");
   return {
     amountOut: out,
@@ -93,20 +93,31 @@ describe("divCeil", () => {
 });
 
 describe("amountOut", () => {
-  it("matches hand-computed values (lp 30 bps, protocol 10 bps)", () => {
-    expect(amountOut(1000n, 1_000_000n, 1_000_000n, LP_FEE_BPS, PROTOCOL_FEE_BPS)).toEqual({
-      amountOut: 995n,
-      reserveInAfter: 1_000_999n,
-      reserveOutAfter: 999_005n,
-      protocolFee: 1n,
+  it("carves the protocol share out of the LP fee (lp 30 bps, share 12%)", () => {
+    // lp_fee = 100000 * 30 / 10000 = 300;  protocol = 300 * 1200 / 10000 = 36.
+    // The swapper pays the 30 bps tier; the output ignores the protocol's share.
+    expect(amountOut(100_000n, 1_000_000n, 1_000_000n, LP_FEE_BPS, PROTOCOL_FEE_SHARE_BPS)).toEqual({
+      amountOut: 90661n,
+      reserveInAfter: 1_099_964n,
+      reserveOutAfter: 909_339n,
+      protocolFee: 36n,
     });
 
-    expect(amountOut(1000n, 1_000_000n, 500_000n, LP_FEE_BPS, PROTOCOL_FEE_BPS)).toEqual({
-      amountOut: 497n,
-      reserveInAfter: 1_000_999n,
-      reserveOutAfter: 499_503n,
-      protocolFee: 1n,
+    // Same input with the protocol's share set to nothing: the output and the
+    // LP's take are identical, and only the pot is empty.
+    expect(amountOut(100_000n, 1_000_000n, 1_000_000n, LP_FEE_BPS, 0n)).toEqual({
+      amountOut: 90661n,
+      reserveInAfter: 1_100_000n,
+      reserveOutAfter: 909_339n,
+      protocolFee: 0n,
     });
+  });
+
+  it("truncates a share below one base unit", () => {
+    // lp_fee = 1000 * 30 / 10000 = 3;  12% of 3 is 0.36, which pays nothing.
+    expect(amountOut(1000n, 1_000_000n, 1_000_000n, LP_FEE_BPS, PROTOCOL_FEE_SHARE_BPS).protocolFee).toBe(
+      0n,
+    );
   });
 
   it("matches the fee-less invariant", () => {
@@ -121,7 +132,7 @@ describe("amountOut", () => {
   it("rejects invalid inputs with the contract error kinds", () => {
     expect(thrownKind(() => amountOut(0n, 1_000_000n, 1_000_000n, 0n, 0n))).toBe("ZeroAmountIn");
     expect(thrownKind(() => amountOut(1000n, 0n, 1_000_000n, 0n, 0n))).toBe("EmptyPool");
-    expect(thrownKind(() => amountOut(1n, 1_000_000n, 1_000_000n, LP_FEE_BPS, PROTOCOL_FEE_BPS))).toBe(
+    expect(thrownKind(() => amountOut(1n, 1_000_000n, 1_000_000n, LP_FEE_BPS, PROTOCOL_FEE_SHARE_BPS))).toBe(
       "ZeroAmountOut",
     );
     expect(thrownKind(() => amountOut(MAX_AMOUNT + 1n, 1_000_000n, 1_000_000n, 0n, 0n))).toBe(
@@ -138,9 +149,9 @@ describe("amountOut", () => {
       for (const reserveIn of reserves) {
         for (const reserveOut of reserves) {
           const call = () =>
-            amountOut(amountIn, reserveIn, reserveOut, LP_FEE_BPS, PROTOCOL_FEE_BPS);
+            amountOut(amountIn, reserveIn, reserveOut, LP_FEE_BPS, PROTOCOL_FEE_SHARE_BPS);
           const ref = () =>
-            refAmountOut(amountIn, reserveIn, reserveOut, LP_FEE_BPS, PROTOCOL_FEE_BPS);
+            refAmountOut(amountIn, reserveIn, reserveOut, LP_FEE_BPS, PROTOCOL_FEE_SHARE_BPS);
           const actualKind = thrownKind(call);
           const refKind = thrownKind(ref);
           expect(actualKind, `amountOut(${amountIn}, ${reserveIn}, ${reserveOut})`).toBe(refKind);

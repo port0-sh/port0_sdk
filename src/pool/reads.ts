@@ -17,7 +17,7 @@ import type { Word4 } from "../math/encoding.js";
 import { word4FromWord } from "../notes/word.js";
 import {
   assetKeyToFaucetIdFelts,
-  decodeAdminWord,
+  decodeAccountIdWord,
   decodeFeesWord,
   decodeProtocolPotWord,
   decodeScalarWord,
@@ -29,23 +29,19 @@ const ZERO: Word4 = [0n, 0n, 0n, 0n];
 
 export interface PoolFees {
   lpFeeBps: bigint;
-  protocolFeeBps: bigint;
-  /** Null until `configure` has written the fees slot. */
-  feeTo: AccountId | null;
+  protocolFeeShareBps: bigint;
 }
 
 export interface PoolState {
   accountId: AccountId;
-  /** True once `configure` has set the LP token key. */
-  configured: boolean;
   token0Key: Word4;
   token1Key: Word4;
-  lpKey: Word4;
   token0FaucetId: AccountId;
   token1FaucetId: AccountId;
   lpSupply: bigint;
   fees: PoolFees;
-  admin: AccountId;
+  /** Registry the pool reads its protocol fee destination from. */
+  registryId: AccountId;
   p2idRoot: Word4;
   protocolPot: { amount0: bigint; amount1: bigint };
   price0CumulativeLast: bigint;
@@ -86,11 +82,12 @@ export function decodePoolState(account: Account): PoolState {
     );
   }
 
-  const lpKey = readWord(storage, POOL_SLOTS.tokenlpAssetKey) ?? ZERO;
   const lpSupply = decodeScalarWord(readWord(storage, POOL_SLOTS.lpSupply) ?? ZERO);
   const feesWord = readWord(storage, POOL_SLOTS.fees) ?? ZERO;
   const fees = decodeFeesWord(feesWord);
-  const admin = decodeAdminWord(readWord(storage, POOL_SLOTS.admin) ?? ZERO);
+  const registryId = decodeAccountIdWord(
+    readWord(storage, POOL_SLOTS.registryId) ?? ZERO,
+  );
   const p2idRoot = readWord(storage, POOL_SLOTS.p2idRoot) ?? ZERO;
   const pot = decodeProtocolPotWord(
     readWord(storage, POOL_SLOTS.protocolPot) ?? ZERO,
@@ -120,22 +117,16 @@ export function decodePoolState(account: Account): PoolState {
 
   return {
     accountId: account.id(),
-    configured: !isZeroWord4(lpKey),
     token0Key,
     token1Key,
-    lpKey,
     token0FaucetId,
     token1FaucetId,
     lpSupply,
     fees: {
       lpFeeBps: fees.lpFeeBps,
-      protocolFeeBps: fees.protocolFeeBps,
-      feeTo:
-        fees.feeTo[0] === 0n && fees.feeTo[1] === 0n
-          ? null
-          : accountIdFromFelts(fees.feeTo),
+      protocolFeeShareBps: fees.protocolFeeShareBps,
     },
-    admin: accountIdFromFelts(admin),
+    registryId: accountIdFromFelts(registryId),
     p2idRoot,
     protocolPot: pot,
     price0CumulativeLast: price0,

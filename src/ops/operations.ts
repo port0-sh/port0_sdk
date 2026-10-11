@@ -22,10 +22,10 @@ import { amountOut, quoteBurn, quoteMint } from "../math/quotes.js";
 import type { SerialNumber } from "../math/encoding.js";
 import { XykError } from "../errors.js";
 import {
-  buildAdminNote,
   buildBurnNote,
   buildCollectNote,
   buildMintNote,
+  buildRegisterNote,
   buildSwapNote,
 } from "../notes/build.js";
 import { buildFeeSponsorshipNote } from "../notes/feeSponsorship.js";
@@ -62,7 +62,7 @@ function sponsor(
   config: PoolConfig,
   sender: AccountId,
   featureNote: Note,
-  kind: "admin" | "mint" | "burn" | "swap" | "collect",
+  kind: "mint" | "burn" | "swap" | "collect",
 ): { sponsorNote: Note; fee: bigint } {
   const fee = noteFee(config.noteFees, kind);
   const sponsorNote = buildFeeSponsorshipNote({
@@ -132,7 +132,7 @@ export function swap(
     reserveIn,
     reserveOut,
     state.fees.lpFeeBps,
-    state.fees.protocolFeeBps,
+    state.fees.protocolFeeShareBps,
   );
   const minAmountOut = applySlippage(quote.amountOut, params.slippageBps);
 
@@ -337,42 +337,71 @@ export function collectFees(
   })();
 }
 
-export interface ConfigureParams {
-  /** The admin account sending the note. */
-  sender: AccountId;
-  feeTo: AccountId;
-  lpFeeBps: bigint;
-  protocolFeeBps: bigint;
+export interface RegistryConfig {
+  /** Registry (network account) the register note targets. */
+  registryId: AccountId;
+  /** Faucet whose asset denominates the register note fee. */
+  feeFaucetId: AccountId;
+  /** Consumption fee for the register note, fixed at registry creation. */
+  registerFee: bigint;
 }
 
-export function configure(
+export interface RegisterPoolParams {
+  /** Account emitting the register note. */
+  sender: AccountId;
+  /** Pool being registered. */
+  poolId: AccountId;
+  /** First token of the pool pair. */
+  asset0: AccountId;
+  /** Second token of the pool pair. */
+  asset1: AccountId;
+}
+
+export interface RegisterPoolOutput {
+  note: Note;
+  sponsorNote: Note;
+  request: TransactionRequest;
+  fee: bigint;
+  feeFaucetId: AccountId;
+}
+
+/**
+ * Emits the register note and its sponsorship note for a pool. The node's
+ * transaction builder consumes the register note against the registry; the
+ * registry then verifies the pool code commitment by FPI.
+ */
+export function registerPool(
   client: MidenClient,
-  config: PoolConfig,
-  state: PoolState,
-  params: ConfigureParams,
+  config: RegistryConfig,
+  params: RegisterPoolParams,
   options?: SubmitOptions,
-): Promise<OperationOutput> {
-  assertPool(state, config);
-  const note = buildAdminNote({
+): Promise<RegisterPoolOutput> {
+  const note = buildRegisterNote({
     sender: params.sender,
-    poolId: config.poolId,
-    feeTo: params.feeTo,
-    lpFeeBps: params.lpFeeBps,
-    protocolFeeBps: params.protocolFeeBps,
+    registryId: config.registryId,
+    poolId: params.poolId,
+    asset0: params.asset0,
+    asset1: params.asset1,
   });
-  const { sponsorNote, fee } = sponsor(config, params.sender, note, "admin");
+  const sponsorNote = buildFeeSponsorshipNote({
+    sender: params.sender,
+    target: config.registryId,
+    featureNote: note,
+    feeFaucetId: config.feeFaucetId,
+    feeAmount: config.registerFee,
+  });
   return (async () => {
     const request = await ownOutputNotesRequest(
       client,
       [note, sponsorNote],
-      config.poolId,
+      config.registryId,
     );
     await submitIfRequested(client, params.sender, request, options);
     return {
       note,
       sponsorNote,
       request,
-      fee,
+      fee: config.registerFee,
       feeFaucetId: config.feeFaucetId,
     };
   })();

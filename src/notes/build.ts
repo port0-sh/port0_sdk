@@ -29,10 +29,11 @@ import {
 } from "../math/encoding.js";
 import { wasmModule } from "../wasm.js";
 import {
-  adminNoteStorage,
+  registryCollectNoteStorage,
   burnNoteStorage,
   collectNoteStorage,
   mintNoteStorage,
+  registerNoteStorage,
   swapNoteStorage,
 } from "./layouts.js";
 import { noteScript } from "./scripts.js";
@@ -193,32 +194,59 @@ export function buildCollectNote(input: CollectNoteInput): Note {
   });
 }
 
-export interface AdminNoteInput {
-  /** The admin account sending the note. */
+export interface RegistryCollectNoteInput {
+  /** Account executing the transaction that emits the note. */
   sender: AccountId;
-  poolId: AccountId;
-  /** Protocol fee recipient. */
-  feeTo: AccountId;
-  lpFeeBps: bigint;
-  protocolFeeBps: bigint;
-  /** Optional P2ID script root; defaults to the standard P2ID root. */
-  p2idRoot?: Word4;
-  /** Optional LP token key; defaults to the pool-issued fungible asset id. */
-  lpKey?: Word4;
+  registryId: AccountId;
+  /** Asset key of the fee asset to sweep. */
+  assetKey: Word4;
+  /** Optional note serial; defaults to a fresh random one. */
+  serial?: Word4;
 }
 
-export function buildAdminNote(input: AdminNoteInput): Note {
+/**
+ * Builds the note that makes the registry pay out its accumulated register fees.
+ *
+ * Collection is permissionless: the destination is the registry's protocol
+ * account, so any sender can trigger it and none can redirect it.
+ */
+export function buildRegistryCollectNote(input: RegistryCollectNoteInput): Note {
   return buildNetworkNote({
     sender: input.sender,
-    target: input.poolId,
-    script: noteScript("admin"),
-    inputs: adminNoteStorage({
+    target: input.registryId,
+    script: noteScript("registry-collect"),
+    inputs: registryCollectNoteStorage({
+      registryId: input.registryId,
+      assetKey: input.assetKey,
+      serial: input.serial ?? randomSerial(),
+    }),
+    assets: [],
+  });
+}
+
+export interface RegisterNoteInput {
+  /** Account executing the transaction that emits the register note. */
+  sender: AccountId;
+  /** Registry (network account) the note targets. */
+  registryId: AccountId;
+  /** Pool being registered. */
+  poolId: AccountId;
+  /** First token of the ordered pair. */
+  asset0: AccountId;
+  /** Second token of the ordered pair. */
+  asset1: AccountId;
+}
+
+export function buildRegisterNote(input: RegisterNoteInput): Note {
+  return buildNetworkNote({
+    sender: input.sender,
+    target: input.registryId,
+    script: noteScript("register"),
+    inputs: registerNoteStorage({
+      registryId: input.registryId,
       poolId: input.poolId,
-      feeTo: input.feeTo,
-      lpFeeBps: input.lpFeeBps,
-      protocolFeeBps: input.protocolFeeBps,
-      p2idRoot: input.p2idRoot ?? p2idRoot(),
-      lpKey: input.lpKey ?? fungibleAssetIdWord(input.poolId),
+      asset0: input.asset0,
+      asset1: input.asset1,
     }),
     assets: [],
   });

@@ -123,7 +123,7 @@ export function amountOut(
   reserveIn: bigint,
   reserveOut: bigint,
   lpFeeBps: bigint,
-  protocolFeeBps: bigint,
+  protocolFeeShareBps: bigint,
 ): SwapQuote {
   if (amountIn === 0n) {
     throw new PoolMathError("ZeroAmountIn");
@@ -135,10 +135,12 @@ export function amountOut(
     throw new PoolMathError("Overflow");
   }
 
-  const protocolFee = (protocolFeeBps * amountIn) / FEE_DENOMINATOR;
-  const lpAmount = amountIn - protocolFee;
+  // The protocol is paid out of the LP fee: the swapper pays the LP fee tier,
+  // and the output does not depend on the protocol's share.
+  const lpFee = (lpFeeBps * amountIn) / FEE_DENOMINATOR;
+  const protocolFee = (protocolFeeShareBps * lpFee) / FEE_DENOMINATOR;
   const weight = FEE_DENOMINATOR - lpFeeBps;
-  const amountInWithFee = lpAmount * weight;
+  const amountInWithFee = amountIn * weight;
 
   const denominator = reserveIn * FEE_DENOMINATOR + amountInWithFee;
   const numerator = amountInWithFee * reserveOut;
@@ -151,7 +153,9 @@ export function amountOut(
     throw new PoolMathError("InsufficientLiquidity");
   }
 
-  const reserveInAfter = reserveIn + lpAmount;
+  // The pool keeps the input minus the protocol's share; that share leaves the
+  // pool for the protocol pot.
+  const reserveInAfter = reserveIn + (amountIn - protocolFee);
   const reserveOutAfter = reserveOut - out;
   if (reserveInAfter >= MAX_AMOUNT) {
     throw new PoolMathError("Overflow");

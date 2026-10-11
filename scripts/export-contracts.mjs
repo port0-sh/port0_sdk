@@ -2,9 +2,10 @@
 /**
  * Exports the compiled MidenXYK contracts into `src/generated/contracts.ts`.
  *
- * Each contract is a standalone cargo-miden crate. The compiled package is the
- * `out.masp` produced by `cargo miden build --release` at
- * `<contract>/target/miden/release/out.masp`.
+ * The contracts are workspace members of `../miden_xyk`, so `cargo miden
+ * build` writes each package to `<workspace>/target/miden/release/<name>.masp`.
+ * The artifact name is the crate package name, with underscores or hyphens as
+ * declared in the crate manifest.
  *
  * Usage:
  *   node scripts/export-contracts.mjs          # read existing artifacts
@@ -25,15 +26,22 @@ const contractsRoot = resolve(
   sdkRoot,
   process.env.MIDEN_XYK_CONTRACTS_DIR ?? "../miden_xyk/contracts",
 );
+const workspaceTarget = resolve(contractsRoot, "..", "target", "miden", "release");
 const outDir = join(sdkRoot, "src", "generated");
 
 const CONTRACTS = [
-  { key: "pool", dir: "miden-xyk" },
-  { key: "admin", dir: "admin-note" },
-  { key: "mint", dir: "mint-note" },
-  { key: "burn", dir: "burn-note" },
-  { key: "swap", dir: "swap-note" },
-  { key: "collect", dir: "collect-note" },
+  { key: "pool", dir: "miden-xyk", artifact: "miden-xyk.masp" },
+  { key: "mint", dir: "mint-note", artifact: "mint_note.masp" },
+  { key: "burn", dir: "burn-note", artifact: "burn_note.masp" },
+  { key: "swap", dir: "swap-note", artifact: "swap_note.masp" },
+  { key: "collect", dir: "collect-note", artifact: "collect_note.masp" },
+  { key: "registry", dir: "pool-registry", artifact: "pool-registry.masp" },
+  { key: "register", dir: "register-note", artifact: "register_note.masp" },
+  {
+    key: "registry-collect",
+    dir: "registry-collect-note",
+    artifact: "registry_collect_note.masp",
+  },
 ];
 
 const build = process.argv.includes("--build");
@@ -45,15 +53,17 @@ if (build) {
     execFileSync(
       "cargo",
       ["miden", "build", "--manifest-path", manifest, "--release"],
-      { stdio: "inherit" },
+      // Run from the contracts workspace root so cargo-miden writes packages to
+      // the workspace target, not the caller's working directory.
+      { stdio: "inherit", cwd: resolve(contractsRoot, "..") },
     );
   }
 }
 
 const artifacts = {};
 const sha256 = {};
-for (const { key, dir } of CONTRACTS) {
-  const maspPath = join(contractsRoot, dir, "target", "miden", "release", "out.masp");
+for (const { key, artifact } of CONTRACTS) {
+  const maspPath = join(workspaceTarget, artifact);
   const bytes = readFileSync(maspPath);
   artifacts[key] = bytes.toString("base64");
   sha256[key] = createHash("sha256").update(bytes).digest("hex");
@@ -69,21 +79,29 @@ const header = `// GENERATED FILE — do not edit by hand.
 `;
 
 const artifactBody = Object.entries(artifacts)
-  .map(([key, value]) => `  ${key}: ${JSON.stringify(value)},`)
+  .map(([key, value]) => `  ${JSON.stringify(key)}: ${JSON.stringify(value)},`)
   .join("\n");
 
 const shaBody = Object.entries(sha256)
-  .map(([key, value]) => `  ${key}: ${JSON.stringify(value)},`)
+  .map(([key, value]) => `  ${JSON.stringify(key)}: ${JSON.stringify(value)},`)
   .join("\n");
 
 const output = `${header}
-export type ContractKind = "pool" | "admin" | "mint" | "burn" | "swap" | "collect";
+export type ContractKind =
+  | "pool"
+  | "registry"
+  | "mint"
+  | "burn"
+  | "swap"
+  | "collect"
+  | "register"
+  | "registry-collect";
 
 /**
- * Base64-encoded compiled Miden packages (.masp) for each XYK contract.
+ * Base64-encoded compiled Miden packages (.masp) for each contract.
  *
- * - \`pool\` is the account-component package; deserialize and pass to
- *   \`AccountComponent.fromPackage\`.
+ * - \`pool\` and \`registry\` are account-component packages; deserialize and
+ *   pass to \`AccountComponent.fromPackage\`.
  * - The remaining entries are note packages; deserialize and pass to
  *   \`NoteScript.fromPackage\`.
  */

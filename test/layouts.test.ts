@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  adminNoteStorage,
+  registryCollectNoteStorage,
   burnNoteStorage,
   collectNoteStorage,
   mintNoteStorage,
+  registerNoteStorage,
   swapNoteStorage,
 } from "../src/notes/layouts.js";
 import type { AccountIdLike } from "../src/math/encoding.js";
@@ -68,21 +69,30 @@ describe("note storage layouts", () => {
     expect(collectNoteStorage(serial)).toEqual([1n, 2n, 3n, 4n]);
   });
 
-  it("admin: pool, fee_to, fees, p2id root, lp key (14 felts)", () => {
-    const feeTo = id(0xc1n, 0xc2n);
-    const p2idRoot = [10n, 11n, 12n, 13n] as const;
-    const lpKey = [14n, 15n, 16n, 17n] as const;
-    const felts = adminNoteStorage({
+  it("register: registry, pool, asset0, asset1 (8 felts)", () => {
+    const registry = id(0xd1n, 0xd2n);
+    const asset0 = id(0xe1n, 0xe2n);
+    const asset1 = id(0xf1n, 0xf2n);
+    const felts = registerNoteStorage({
+      registryId: registry,
       poolId: pool,
-      feeTo,
-      lpFeeBps: 30n,
-      protocolFeeBps: 10n,
-      p2idRoot,
-      lpKey,
+      asset0,
+      asset1,
     });
-    expect(felts).toHaveLength(14);
+    expect(felts).toHaveLength(8);
     expect(felts).toEqual([
-      0xa1n, 0xa2n, 0xc1n, 0xc2n, 30n, 10n, 10n, 11n, 12n, 13n, 14n, 15n, 16n, 17n,
+      0xd1n, 0xd2n, 0xa1n, 0xa2n, 0xe1n, 0xe2n, 0xf1n, 0xf2n,
+    ]);
+  });
+
+  it("registry-collect: registry, asset key, serial (10 felts)", () => {
+    const registry = id(0xa1n, 0xa2n);
+    const assetKey = [1n, 2n, 3n, 4n] as const;
+    const serial = [5n, 6n, 7n, 8n] as const;
+    const felts = registryCollectNoteStorage({ registryId: registry, assetKey, serial });
+    expect(felts).toHaveLength(10);
+    expect(felts).toEqual([
+      0xa1n, 0xa2n, 1n, 2n, 3n, 4n, 5n, 6n, 7n, 8n,
     ]);
   });
 });

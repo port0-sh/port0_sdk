@@ -25,19 +25,32 @@ export const FEE_DENOMINATOR: bigint = 10_000n;
  */
 export const SLOT_PREFIX = "miden_xyk::miden_xyk";
 
-/** The 11 value slots declared by `MidenXykStorage`. */
+/** The 10 value slots declared by `MidenXykStorage`. */
 export const POOL_SLOTS = {
-  tokenlpAssetKey: `${SLOT_PREFIX}::tokenlp_asset_key`,
   token0AssetKey: `${SLOT_PREFIX}::token0_asset_key`,
   token1AssetKey: `${SLOT_PREFIX}::token1_asset_key`,
   lpSupply: `${SLOT_PREFIX}::lp_supply`,
   fees: `${SLOT_PREFIX}::fees`,
-  admin: `${SLOT_PREFIX}::admin`,
   p2idRoot: `${SLOT_PREFIX}::p2id_root`,
   protocolPot: `${SLOT_PREFIX}::protocol_pot`,
   price0CumulativeLast: `${SLOT_PREFIX}::price0_cumulative_last`,
   price1CumulativeLast: `${SLOT_PREFIX}::price1_cumulative_last`,
   blockTimestampLast: `${SLOT_PREFIX}::block_timestamp_last`,
+  registryId: `${SLOT_PREFIX}::registry_id`,
 } as const;
 
 export type PoolSlotName = (typeof POOL_SLOTS)[keyof typeof POOL_SLOTS];
+
+/** Registry slot prefix, mirroring `contracts/pool-registry`. */
+export const REGISTRY_SLOT_PREFIX = "pool_registry::pool_registry";
+
+/** The registry's value slots and maps. */
+export const REGISTRY_SLOTS = {
+  acceptedCodeCommitments: `${REGISTRY_SLOT_PREFIX}::accepted_code_commitments`,
+  pools: `${REGISTRY_SLOT_PREFIX}::pools`,
+  assetsToPool: `${REGISTRY_SLOT_PREFIX}::assets_to_pool`,
+  protocolFeeTo: `${REGISTRY_SLOT_PREFIX}::protocol_fee_to`,
+  protocolFeeShareBps: `${REGISTRY_SLOT_PREFIX}::protocol_fee_share_bps`,
+  allowedLpFeeBps: `${REGISTRY_SLOT_PREFIX}::allowed_lp_fee_bps`,
+  p2idRoot: `${REGISTRY_SLOT_PREFIX}::p2id_root`,
+} as const;
