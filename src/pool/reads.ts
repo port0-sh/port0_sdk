@@ -1,7 +1,7 @@
 /**
  * Pool state reads.
  *
- * `decodePoolState` decodes the eleven storage slots plus the vault into a
+ * `decodePoolState` decodes the ten storage slots plus the vault into a
  * typed `PoolState`. Reserves are the vault balances of token0 and token1
  * minus the protocol pot, matching the contract's `get_reserves`.
  */

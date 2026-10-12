@@ -1,5 +1,5 @@
 /**
- * Pure felt layouts for the five XYK note scripts.
+ * Pure felt layouts for the XYK note scripts.
  *
  * Each note script asserts a fixed storage length and reads fields in the
  * exact order below. Account ids are `[prefix, suffix]`; a serial number is

@@ -237,6 +237,28 @@ const registryAccount = await createRegistryAccount(client, {
   p2idRoot: [9n, 10n, 11n, 12n],
 });
 assert.equal(registryAccount.isNetworkAccount(), true);
+
+// The registry admits both of its note kinds, and none of the pool's. A root the
+// fee policy does not price aborts fee estimation, so a missing entry here is a
+// note the registry can never consume, however permissionless it is meant to be.
+// The standard config and fee-sponsorship scripts are allowlisted on top of the
+// caller's roots, so the allowlist is longer than the two below.
+const registryAllowlist = new Set(
+  (registryAccount.networkNoteAllowlist() ?? []).map((root) => root.toHex()),
+);
+console.log(`registry allowlist: ${registryAllowlist.size} roots`);
+for (const kind of ["register", "registry-collect"]) {
+  assert.ok(
+    registryAllowlist.has(noteScript(kind).root().toHex()),
+    `registry admits the ${kind} note`,
+  );
+}
+for (const kind of ["mint", "burn", "swap", "collect"]) {
+  assert.ok(
+    !registryAllowlist.has(noteScript(kind).root().toHex()),
+    `registry does not admit the ${kind} note`,
+  );
+}
 const accepted = await readRegistryAcceptedCodeCommitments(
   (id) => client.accounts.get(id),
   registryAccount.id(),

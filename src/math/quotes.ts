@@ -114,9 +114,9 @@ export function divCeil(numerator: bigint, denominator: bigint): bigint {
 /**
  * Swap amount-out formula, ported from `amm/swap.rs::amount_out`.
  *
- * The protocol fee is taken from the input first; the LP fee applies to the
- * remainder. Returns the amount out, the post-swap reserves, and the protocol
- * fee recorded in the pot.
+ * The protocol fee is carved out of the LP fee: the swapper pays the LP fee
+ * tier, and the output does not depend on the protocol's share. Returns the
+ * amount out, the post-swap reserves, and the protocol fee recorded in the pot.
  */
 export function amountOut(
   amountIn: bigint,

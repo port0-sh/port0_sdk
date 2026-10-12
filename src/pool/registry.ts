@@ -226,9 +226,9 @@ export interface CreateRegistryAccountParams {
 
 /**
  * Builds the registry network account, seeds `accepted_code_commitments` with
- * the accepted pool code commitment, installs the network auth allowing only
- * the register note, and inserts the account into the client's local store.
- * Does not deploy it; call `deployRegistryAccount` for that.
+ * the accepted pool code commitment, installs the network auth admitting the
+ * registry's two note kinds, and inserts the account into the client's local
+ * store. Does not deploy it; call `deployRegistryAccount` for that.
  */
 export async function createRegistryAccount(
   client: MidenClient,
@@ -274,8 +274,13 @@ export async function createRegistryAccount(
     slots,
   );
 
+  // Every admitted script root must carry a fee: a root that the fee policy does
+  // not price aborts fee estimation for that note, so the registry could never
+  // consume it. Collection is permissionless and no one sponsors it, so the
+  // registry prices it at zero and pays the network fee from its own vault.
   const feeEntries = [
     new NoteScriptFee(noteScript("register").root(), params.registerFee),
+    new NoteScriptFee(noteScript("registry-collect").root(), 0n),
   ];
   const authComponents = AccountComponent.createNetworkAuthComponents(
     feeEntries,

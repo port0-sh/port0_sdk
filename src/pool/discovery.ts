@@ -19,7 +19,7 @@ export function xykNoteScriptRoots(): Record<
   ) as Record<(typeof POOL_NOTE_KINDS)[number], string>;
 }
 
-/** True when `account` is a network account allowlisting all five XYK notes. */
+/** True when `account` is a network account allowlisting all four XYK notes. */
 export function isXykPool(account: Account): boolean {
   if (!account.isNetworkAccount()) {
     return false;

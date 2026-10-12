@@ -1,7 +1,7 @@
 /**
  * Pure decoders for the pool's storage words.
  *
- * The pool stores eleven value slots; several encode structured data inside a
+ * The pool stores ten value slots; several encode structured data inside a
  * single word. These functions take a four-limb word (`Word4`) and return the
  * decoded fields without touching WASM, so the layouts are unit-testable
  * against the contract's storage table.

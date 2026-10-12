@@ -8,7 +8,7 @@
 import { NoteScript, Package } from "@miden-sdk/miden-sdk";
 import { contractPackageBytes } from "../artifacts.js";
 
-/** The five note packages the pool itself consumes. */
+/** The four note packages the pool itself consumes. */
 export type PoolNoteKind = "mint" | "burn" | "swap" | "collect";
 
 /** Every note script the SDK ships. */
