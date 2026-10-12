@@ -40,6 +40,7 @@ import {
 import {
   createRegistryAccount,
   deployRegistryAccount,
+  noteScript,
   p2idRoot,
   readRegistryAcceptedCodeCommitments,
   wasmModule,
@@ -208,13 +209,15 @@ async function resolveOperator(client, accounts) {
 }
 
 /**
- * Reuses a stored registry only when it accepts the configured pool code.
+ * Reuses a stored registry only when it admits both registry notes and accepts
+ * the configured pool code.
  *
- * A registry is immutable, so one deployed with a different accepted
- * commitment, or before the registry contract had the fields this config
- * needs, can never serve it. Reusing such an account silently leaves the
- * deployment pointing at a registry that rejects every new pool, so a
- * non-matching account is reported and a fresh registry is deployed instead.
+ * A registry is immutable, so an account that accepts a different commitment,
+ * or that was built before the registry-collect entry was added to its note
+ * allowlist, can never serve this deployment. One rejects every new pool, the
+ * other leaves its register fees uncollectable, and both would be reused
+ * silently by a check that looked at the accepted code alone. A non-matching
+ * account is reported and a fresh registry is deployed instead.
  */
 async function resolveRegistry(client, accounts, operator, config) {
   const candidates = accounts.filter(
@@ -234,7 +237,22 @@ async function resolveRegistry(client, accounts, operator, config) {
         word.every((limb, index) => BigInt(limb) === expected[index]),
     );
 
+  // A root the fee policy does not price aborts fee estimation, so the registry
+  // can never consume that note: the account's own auth rejects it as an input.
+  const collectRoot = noteScript("registry-collect").root().toHex();
+
   for (const candidate of candidates) {
+    const admitted = new Set(
+      (candidate.networkNoteAllowlist() ?? []).map((root) => root.toHex()),
+    );
+    if (!admitted.has(collectRoot)) {
+      console.log(
+        `stored registry ${candidate.id().toString()} does not admit the registry-collect ` +
+          `note (${admitted.size} note root(s) allowlisted); deploying a new registry`,
+      );
+      continue;
+    }
+
     const accepted = await readRegistryAcceptedCodeCommitments(
       (id) => client.accounts.get(id),
       candidate.id(),
