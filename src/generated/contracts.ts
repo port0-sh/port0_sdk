@@ -1,6 +1,6 @@
-// GENERATED FILE — do not edit by hand.
+// GENERATED FILE: do not edit by hand.
 // Regenerate with: node scripts/export-contracts.mjs [--build]
-// Source: /home/mic0/crypto/miden_xyk/contracts
+// Source: the miden_xyk contracts workspace (MIDEN_XYK_CONTRACTS_DIR overrides).
 
 
 export type ContractKind =
@@ -45,4 +45,4 @@ export const CONTRACT_SHA256: Record<ContractKind, string> = {
 };
 
 /** Wall-clock time this file was generated. */
-export const GENERATED_AT: string = "2026-10-10T19:12:56.963Z";
+export const GENERATED_AT: string = "2026-10-12T16:50:57.520Z";

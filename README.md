@@ -9,8 +9,10 @@ transaction request assembly.
 A pool is a public network account. The pool consumes four XYK notes (`mint`,
 `burn`, `swap`, `collect`). The registry consumes two: `register`, and
 `registry-collect`, which sweeps the register fees the registry has accumulated.
-Each note travels with a FEE_SPONSORSHIP note that pays the pool's configured
-note consumption fee.
+A pool note travels with a FEE_SPONSORSHIP note that pays the pool's configured
+note consumption fee, and the register note is sponsored the same way against
+the registry's fee. `registry-collect` is unsponsored and priced at zero, so
+the registry pays that transaction's fee from its own vault.
 
 ## Install
 
@@ -274,8 +276,7 @@ Builds one `TransactionRequest` with `notes` as own output notes, plus the
 
 Notes are pushed rather than constructor-consumed so the caller keeps valid
 `Note` references. Async because it reads the client sync height and the chain
-fee faucet. Used to emit a feature note and its sponsorship note in one
-transaction.
+fee faucet. Emits a feature note and its sponsorship note in one transaction.
 
 ## Pool reads (`pool/reads.ts`, `pool/decoding.ts`)
 
@@ -325,7 +326,7 @@ protocolFeeShareBps: bigint, allowedLpFeeBps: readonly bigint[],
 p2idRoot: Word4, seed?: Uint8Array }`. `createRegistryAccount` builds the
 registry, seeds `accepted_code_commitments` with the accepted pool code
 commitment, seeds `allowed_lp_fee_bps` with the permitted tiers, installs the
-network auth with the register note's fee entry, and inserts the account.
+network auth with both registry note kinds priced, and inserts the account.
 `deployRegistryAccount` consumes a funding note as the first transaction.
 
 `RegistryConfig` is `{ registryId: AccountId, feeFaucetId: AccountId,
@@ -384,8 +385,8 @@ do not affect it.
 `deployPoolAccount` consumes `fundingNoteId` as the pool's first transaction.
 A 0.17 network account rejects a transaction with no effect with
 `ERR_NETWORK_ACCOUNT_TRANSACTION_HAS_NO_EFFECT`, so an empty scriptless deploy
-no longer commits the account; consuming a funding note both commits the
-account and pays its first transaction fee from the received funds. The pool
+fails; consuming a funding note both commits the account and pays its first
+transaction fee from the received funds. The pool
 is funded first with a small chain fee asset note. The pool id is passed to
 `transactions.consume` as a hex string, not as an `AccountId`, because the
 client re-parses account references worker-side. `DeployOptions` forwards
@@ -545,8 +546,8 @@ test/
 
 # Regenerating artifacts
 
-The generated file embeds the eight compiled Miden packages from
-`../miden_xyk/contracts`. Regenerate it whenever the contracts change:
+The generated file embeds the eight compiled Miden packages from the
+`miden_xyk` contracts workspace. Regenerate it whenever the contracts change:
 
 ```sh
 npm run generate          # read existing build artifacts
@@ -578,8 +579,8 @@ Copy `.env.example` to `.env` and fill it in. The scripts load `.env` from the
 repo root; real environment variables take precedence, and a missing file is
 not an error.
 
-For the full stack bring-up and the pool deployment flow, see
-`../miden_xyk_app/RUNBOOK.md`.
+For the full stack bring-up and the pool deployment flow, see the `RUNBOOK.md`
+in the `miden_xyk_app` repository.
 
 The WASM smoke test runs as a plain Node process (`test/wasm-smoke.mjs`) rather
 than under vitest: the web-sdk native module is unreliable inside vitest's

@@ -2,17 +2,19 @@
 /**
  * Exports the compiled MidenXYK contracts into `src/generated/contracts.ts`.
  *
- * The contracts are workspace members of `../miden_xyk`, so `cargo miden
- * build` writes each package to `<workspace>/target/miden/release/<name>.masp`.
- * The artifact name is the crate package name, with underscores or hyphens as
- * declared in the crate manifest.
+ * The contracts are workspace members of the `miden_xyk` repository, so
+ * `cargo miden build` writes each package to
+ * `<workspace>/target/miden/release/<name>.masp`. The artifact name is the
+ * crate package name, with underscores or hyphens as declared in the crate
+ * manifest.
  *
  * Usage:
  *   node scripts/export-contracts.mjs          # read existing artifacts
  *   node scripts/export-contracts.mjs --build  # rebuild contracts first
  *
- * The contracts directory is `../miden_xyk/contracts` by default; override
- * with the MIDEN_XYK_CONTRACTS_DIR environment variable.
+ * The contracts directory defaults to the `miden_xyk` checkout at
+ * `../miden_xyk/contracts` relative to this repository; override it with the
+ * MIDEN_XYK_CONTRACTS_DIR environment variable.
  */
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -72,9 +74,9 @@ for (const { key, artifact } of CONTRACTS) {
 
 mkdirSync(outDir, { recursive: true });
 
-const header = `// GENERATED FILE — do not edit by hand.
+const header = `// GENERATED FILE: do not edit by hand.
 // Regenerate with: node scripts/export-contracts.mjs [--build]
-// Source: ${contractsRoot}
+// Source: the miden_xyk contracts workspace (MIDEN_XYK_CONTRACTS_DIR overrides).
 
 `;
 

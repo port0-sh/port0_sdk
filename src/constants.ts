@@ -1,5 +1,6 @@
 /**
- * Contract-level constants mirrored from `../miden_xyk`.
+ * Contract-level constants mirrored from the `miden_xyk` contracts
+ * workspace.
  *
  * These are part of the XYK ABI: the pool component reads and writes the same
  * slot names on-chain, and the math constants bound every amount accepted by
