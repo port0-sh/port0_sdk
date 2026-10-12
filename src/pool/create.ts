@@ -1,7 +1,7 @@
 /**
  * Pool account creation and deployment.
  *
- * An XYK pool is a public network account: it carries the miden-xyk account
+ * An XYK pool is a public network account: it carries the port0 account
  * component plus the standard network-account auth component, whose
  * note-script allowlist is what the node's network transaction builder reads
  * to auto-consume the pool's notes. There is no signature key.

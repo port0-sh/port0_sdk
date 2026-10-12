@@ -1,6 +1,6 @@
-# miden-xyk-sdk
+# port0-sdk
 
-TypeScript SDK for the MidenXYK constant-product AMM. It wraps
+TypeScript SDK for the port0.sh constant-product AMM. It wraps
 `@miden-sdk/miden-sdk` and owns every Miden-specific step: compiled contract
 packages, note script loading, note storage layouts, fee sponsorship notes,
 quotes, pool state decoding, pool and registry account creation, and
@@ -17,7 +17,7 @@ the registry pays that transaction's fee from its own vault.
 ## Install
 
 ```
-npm install miden-xyk-sdk @miden-sdk/miden-sdk@0.17.1
+npm install port0-sdk @miden-sdk/miden-sdk@0.17.1
 ```
 
 The SDK peers on `@miden-sdk/miden-sdk@^0.17.0` and is developed and tested
@@ -27,7 +27,7 @@ against `0.17.1`. Pin the exact version the testnet runs.
 
 ```ts
 import { MidenClient } from "@miden-sdk/miden-sdk";
-import { XykClient, deadlineFrom } from "miden-xyk-sdk";
+import { XykClient, deadlineFrom } from "port0-sdk";
 
 const client = await MidenClient.create({
   rpcUrl: "https://rpc.testnet.miden.io/",
@@ -78,7 +78,7 @@ type SerialNumber = Word4;
 | `MAX_AMOUNT` | `1n << 57n` | Upper bound on every reserve, amount, and `lp_supply`. |
 | `MINIMUM_LIQUIDITY` | `1000n` | LP tokens locked permanently on the first mint. |
 | `FEE_DENOMINATOR` | `10_000n` | Basis-point denominator for both fees. |
-| `SLOT_PREFIX` | `"miden_xyk::miden_xyk"` | Storage slot name prefix shared by all pool slots. |
+| `SLOT_PREFIX` | `"port0::port0"` | Storage slot name prefix shared by all pool slots. |
 | `REGISTRY_SLOT_PREFIX` | `"pool_registry::pool_registry"` | Storage slot name prefix shared by all registry slots. |
 
 `POOL_SLOTS` names the ten exact value slots:
@@ -547,14 +547,14 @@ test/
 # Regenerating artifacts
 
 The generated file embeds the eight compiled Miden packages from the
-`miden_xyk` contracts workspace. Regenerate it whenever the contracts change:
+`port0` contracts workspace. Regenerate it whenever the contracts change:
 
 ```sh
 npm run generate          # read existing build artifacts
 npm run generate:build    # cargo miden build first, then read
 ```
 
-Override the contracts directory with `MIDEN_XYK_CONTRACTS_DIR`.
+Override the contracts directory with `PORT0_CONTRACTS_DIR`.
 
 # Build and test
 
@@ -569,7 +569,7 @@ npm run registry:deploy   # builds, then creates and deploys the registry accoun
 ```
 
 `registry:deploy` uses the Node client with its filesystem store under
-`~/.miden/stores/<MIDEN_XYK_STORE>/`. It is interactive: when the operator
+`~/.miden/stores/<PORT0_STORE>/`. It is interactive: when the operator
 wallet is missing or underfunded it prints the address and polls until the
 chain fee asset arrives, then builds the registry through
 `createRegistryAccount`, funds it, and consumes the funding note. No re-run is
@@ -580,7 +580,7 @@ repo root; real environment variables take precedence, and a missing file is
 not an error.
 
 For the full stack bring-up and the pool deployment flow, see the `RUNBOOK.md`
-in the `miden_xyk_app` repository.
+in the `port0_app` repository.
 
 The WASM smoke test runs as a plain Node process (`test/wasm-smoke.mjs`) rather
 than under vitest: the web-sdk native module is unreliable inside vitest's

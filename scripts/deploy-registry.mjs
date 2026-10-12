@@ -11,22 +11,22 @@
  * Interactive by default. If the operator wallet is missing or underfunded,
  * the script prints its address and polls until the fee asset arrives, then
  * funds and deploys the registry without a re-run. The wait is bounded by
- * `MIDEN_XYK_WAIT_SECS` (default 600); on timeout it prints the address and
+ * `PORT0_WAIT_SECS` (default 600); on timeout it prints the address and
  * exits. The Node client keeps its store and keys under
- * `~/.miden/stores/<MIDEN_XYK_STORE>/`, so a re-run resumes from that state,
+ * `~/.miden/stores/<PORT0_STORE>/`, so a re-run resumes from that state,
  * and an already-deployed registry is reported and left alone.
  *
  * Environment (from the environment or a `.env` file in the current directory):
- *   MIDEN_XYK_FEE_FAUCET_ID   required, chain fee faucet
- *   MIDEN_XYK_POOL_COMMITMENT required, from `npm run pool:commitment`
+ *   PORT0_FEE_FAUCET_ID   required, chain fee faucet
+ *   PORT0_POOL_COMMITMENT required, from `npm run pool:commitment`
  *   MIDEN_RPC_URL             default https://rpc.testnet.miden.io
- *   MIDEN_XYK_REGISTER_FEE    default 0, register note fee in base units
- *   MIDEN_XYK_FUND            default 1000, base units sent to the registry
- *   MIDEN_XYK_STORE           default miden-xyk-registry
- *   MIDEN_XYK_OPERATOR        optional, existing operator account id
- *   MIDEN_XYK_PROVER          default testnet
- *   MIDEN_XYK_NOTE_TRANSPORT  default testnet, for private notes
- *   MIDEN_XYK_WAIT_SECS       default 600, funding wait timeout
+ *   PORT0_REGISTER_FEE    default 0, register note fee in base units
+ *   PORT0_FUND            default 1000, base units sent to the registry
+ *   PORT0_STORE           default port0-registry
+ *   PORT0_OPERATOR        optional, existing operator account id
+ *   PORT0_PROVER          default testnet
+ *   PORT0_NOTE_TRANSPORT  default testnet, for private notes
+ *   PORT0_WAIT_SECS       default 600, funding wait timeout
  *
  * Run: npm run build && node scripts/deploy-registry.mjs
  */
@@ -58,25 +58,25 @@ async function main() {
     process.loadEnvFile(".env");
   }
 
-  const feeFaucetId = required("MIDEN_XYK_FEE_FAUCET_ID");
-  const poolCommitment = required("MIDEN_XYK_POOL_COMMITMENT");
+  const feeFaucetId = required("PORT0_FEE_FAUCET_ID");
+  const poolCommitment = required("PORT0_POOL_COMMITMENT");
   const rpcUrl = process.env.MIDEN_RPC_URL ?? "https://rpc.testnet.miden.io";
-  const registerFee = BigInt(process.env.MIDEN_XYK_REGISTER_FEE ?? "133");
-  const protocolFeeTo = required("MIDEN_XYK_PROTOCOL_FEE_TO");
-  const protocolFeeShareBps = BigInt(process.env.MIDEN_XYK_PROTOCOL_FEE_SHARE_BPS ?? "1200");
-  const allowedLpFeeBps = (process.env.MIDEN_XYK_LP_FEE_TIERS ?? "5,30,100")
+  const registerFee = BigInt(process.env.PORT0_REGISTER_FEE ?? "133");
+  const protocolFeeTo = required("PORT0_PROTOCOL_FEE_TO");
+  const protocolFeeShareBps = BigInt(process.env.PORT0_PROTOCOL_FEE_SHARE_BPS ?? "1200");
+  const allowedLpFeeBps = (process.env.PORT0_LP_FEE_TIERS ?? "5,30,100")
     .split(",")
     .map((value) => BigInt(value.trim()));
   // The registry pays its accumulated fees with the standard P2ID note this
   // SDK ships with. A different root would need a matching consumer.
   const registryP2idRoot = p2idRoot();
-  const fundAmount = BigInt(process.env.MIDEN_XYK_FUND ?? "1000");
-  const storeName = process.env.MIDEN_XYK_STORE ?? "miden-xyk-registry";
-  const operatorRef = process.env.MIDEN_XYK_OPERATOR;
-  const proverUrl = process.env.MIDEN_XYK_PROVER ?? "testnet";
+  const fundAmount = BigInt(process.env.PORT0_FUND ?? "1000");
+  const storeName = process.env.PORT0_STORE ?? "port0-registry";
+  const operatorRef = process.env.PORT0_OPERATOR;
+  const proverUrl = process.env.PORT0_PROVER ?? "testnet";
   const noteTransportUrl =
-    process.env.MIDEN_XYK_NOTE_TRANSPORT ?? "testnet";
-  const waitSecs = Number(process.env.MIDEN_XYK_WAIT_SECS ?? "600");
+    process.env.PORT0_NOTE_TRANSPORT ?? "testnet";
+  const waitSecs = Number(process.env.PORT0_WAIT_SECS ?? "600");
 
   const client = await MidenClient.create({
     rpcUrl,
@@ -184,18 +184,18 @@ async function allAccounts(client) {
 
 /** Resolves the operator wallet, creating one on first run. */
 async function resolveOperator(client, accounts) {
-  const operatorRef = process.env.MIDEN_XYK_OPERATOR;
+  const operatorRef = process.env.PORT0_OPERATOR;
   if (operatorRef) {
     const account = await client.accounts.get(operatorRef);
     if (!account) {
       throw new Error(
-        `operator ${operatorRef} is not in this store (${process.env.MIDEN_XYK_STORE ?? "default"}).\n` +
+        `operator ${operatorRef} is not in this store (${process.env.PORT0_STORE ?? "default"}).\n` +
           "The operator pays for the deployment, so this script has to sign a transaction as it: " +
           "the account must be one whose keys this store holds. A wallet extension's account is " +
           "private and cannot be driven from here.\n" +
-          "Leave MIDEN_XYK_OPERATOR unset to have the script create and use a local operator, then " +
+          "Leave PORT0_OPERATOR unset to have the script create and use a local operator, then " +
           "fund the address it prints. The protocol fee recipient is only a payout address, so " +
-          "MIDEN_XYK_PROTOCOL_FEE_TO may be any account, including your wallet.",
+          "PORT0_PROTOCOL_FEE_TO may be any account, including your wallet.",
       );
     }
     return account;

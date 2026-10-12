@@ -1,7 +1,7 @@
 {
-  "name": "miden-xyk-sdk",
+  "name": "port0-sdk",
   "version": "0.1.0",
-  "description": "TypeScript SDK for the MidenXYK constant-product AMM. Builds XYK network notes, fee sponsorships, quotes, pool reads, and pool operations on top of @miden-sdk/miden-sdk.",
+  "description": "TypeScript SDK for the port0.sh constant-product AMM. Builds XYK network notes, fee sponsorships, quotes, pool reads, and pool operations on top of @miden-sdk/miden-sdk.",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,

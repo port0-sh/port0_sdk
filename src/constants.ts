@@ -1,5 +1,5 @@
 /**
- * Contract-level constants mirrored from the `miden_xyk` contracts
+ * Contract-level constants mirrored from the `port0` contracts
  * workspace.
  *
  * These are part of the XYK ABI: the pool component reads and writes the same
@@ -18,15 +18,15 @@ export const MINIMUM_LIQUIDITY: bigint = 1000n;
 export const FEE_DENOMINATOR: bigint = 10_000n;
 
 /**
- * Storage slot name prefix shared by every `miden-xyk` component slot.
+ * Storage slot name prefix shared by every `port0` component slot.
  *
  * Slot names are `<package_name>::<interface_segment>::<field_name>`; the
- * package name is `miden-xyk` and the interface segment is `miden-xyk`, both
- * sanitised to `miden_xyk`. Mirrors `integration/tests/miden_xyk_test.rs`.
+ * package name is `port0` and the interface segment is `port0`, both
+ * sanitised to `port0`. Mirrors `integration/tests/port0_test.rs`.
  */
-export const SLOT_PREFIX = "miden_xyk::miden_xyk";
+export const SLOT_PREFIX = "port0::port0";
 
-/** The 10 value slots declared by `MidenXykStorage`. */
+/** The 10 value slots declared by `Port0Storage`. */
 export const POOL_SLOTS = {
   token0AssetKey: `${SLOT_PREFIX}::token0_asset_key`,
   token1AssetKey: `${SLOT_PREFIX}::token1_asset_key`,

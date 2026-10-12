@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Exports the compiled MidenXYK contracts into `src/generated/contracts.ts`.
+ * Exports the compiled port0.sh contracts into `src/generated/contracts.ts`.
  *
- * The contracts are workspace members of the `miden_xyk` repository, so
+ * The contracts are workspace members of the `port0` repository, so
  * `cargo miden build` writes each package to
  * `<workspace>/target/miden/release/<name>.masp`. The artifact name is the
  * crate package name, with underscores or hyphens as declared in the crate
@@ -12,9 +12,9 @@
  *   node scripts/export-contracts.mjs          # read existing artifacts
  *   node scripts/export-contracts.mjs --build  # rebuild contracts first
  *
- * The contracts directory defaults to the `miden_xyk` checkout at
- * `../miden_xyk/contracts` relative to this repository; override it with the
- * MIDEN_XYK_CONTRACTS_DIR environment variable.
+ * The contracts directory defaults to the `port0` checkout at
+ * `../port0_contracts/contracts` relative to this repository; override it with the
+ * PORT0_CONTRACTS_DIR environment variable.
  */
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -26,13 +26,13 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 const sdkRoot = resolve(scriptDir, "..");
 const contractsRoot = resolve(
   sdkRoot,
-  process.env.MIDEN_XYK_CONTRACTS_DIR ?? "../miden_xyk/contracts",
+  process.env.PORT0_CONTRACTS_DIR ?? "../port0_contracts/contracts",
 );
 const workspaceTarget = resolve(contractsRoot, "..", "target", "miden", "release");
 const outDir = join(sdkRoot, "src", "generated");
 
 const CONTRACTS = [
-  { key: "pool", dir: "miden-xyk", artifact: "miden-xyk.masp" },
+  { key: "pool", dir: "port0", artifact: "port0.masp" },
   { key: "mint", dir: "mint-note", artifact: "mint_note.masp" },
   { key: "burn", dir: "burn-note", artifact: "burn_note.masp" },
   { key: "swap", dir: "swap-note", artifact: "swap_note.masp" },
@@ -76,7 +76,7 @@ mkdirSync(outDir, { recursive: true });
 
 const header = `// GENERATED FILE: do not edit by hand.
 // Regenerate with: node scripts/export-contracts.mjs [--build]
-// Source: the miden_xyk contracts workspace (MIDEN_XYK_CONTRACTS_DIR overrides).
+// Source: the port0 contracts workspace (PORT0_CONTRACTS_DIR overrides).
 
 `;
 

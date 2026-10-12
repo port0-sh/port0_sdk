@@ -1,6 +1,6 @@
 /**
- * Pure TS ports of the pool math in the `miden_xyk` contracts workspace
- * (`contracts/miden-xyk/src/amm`).
+ * Pure TS ports of the pool math in the `port0` contracts workspace
+ * (`contracts/port0/src/amm`).
  *
  * Every function mirrors the Rust implementation exactly: same argument order,
  * same rounding (floor division, `div_ceil` for the LP-favouring mint amounts),

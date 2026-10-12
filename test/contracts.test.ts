@@ -36,16 +36,16 @@ describe("pool constants", () => {
 
   it("declares the 10 pool storage slot names", () => {
     expect(Object.values(POOL_SLOTS)).toEqual([
-      "miden_xyk::miden_xyk::token0_asset_key",
-      "miden_xyk::miden_xyk::token1_asset_key",
-      "miden_xyk::miden_xyk::lp_supply",
-      "miden_xyk::miden_xyk::fees",
-      "miden_xyk::miden_xyk::p2id_root",
-      "miden_xyk::miden_xyk::protocol_pot",
-      "miden_xyk::miden_xyk::price0_cumulative_last",
-      "miden_xyk::miden_xyk::price1_cumulative_last",
-      "miden_xyk::miden_xyk::block_timestamp_last",
-      "miden_xyk::miden_xyk::registry_id",
+      "port0::port0::token0_asset_key",
+      "port0::port0::token1_asset_key",
+      "port0::port0::lp_supply",
+      "port0::port0::fees",
+      "port0::port0::p2id_root",
+      "port0::port0::protocol_pot",
+      "port0::port0::price0_cumulative_last",
+      "port0::port0::price1_cumulative_last",
+      "port0::port0::block_timestamp_last",
+      "port0::port0::registry_id",
     ]);
   });
 });
