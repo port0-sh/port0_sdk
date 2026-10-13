@@ -16,12 +16,12 @@ the registry pays that transaction's fee from its own vault.
 
 ## Install
 
-```
-npm install @port0.sh/sdk @miden-sdk/miden-sdk@0.17.1
+```sh
+npm install @port0.sh/sdk @miden-sdk/miden-sdk
 ```
 
-The SDK peers on `@miden-sdk/miden-sdk@^0.17.0` and is developed and tested
-against `0.17.1`. Pin the exact version the testnet runs.
+The SDK peers on `@miden-sdk/miden-sdk`. Pin the version the testnet runs; see
+https://status.testnet.miden.io/.
 
 ## Quick start
 
@@ -263,7 +263,7 @@ ownOutputNotesRequest(
 ```
 
 Builds one `TransactionRequest` with `notes` as own output notes, plus the
-0.17 machinery a wallet-executed multisig request needs:
+machinery a wallet-executed multisig request needs:
 
 - A three-word `MultisigAuthArgs` preimage,
   `[boundBlock, 0, 0, 0] || SALT || CONVERSION_INFO` (12 felts), committed with
@@ -277,6 +277,25 @@ Builds one `TransactionRequest` with `notes` as own output notes, plus the
 Notes are pushed rather than constructor-consumed so the caller keeps valid
 `Note` references. Async because it reads the client sync height and the chain
 fee faucet. Emits a feature note and its sponsorship note in one transaction.
+
+```ts
+outputNotesRequest(
+  client: MidenClient,
+  notes: Note[],
+  targetAccountId: AccountId,
+): Promise<TransactionRequest>
+```
+
+The twin for an account whose key the client holds. The wallet variant above
+declares the multisig `MultisigAuthArgs` preimage a wallet reads. A local
+account signs instead, and the client attaches the signature and the conversion
+info it fetched itself. This variant declares no auth args and no block numbers,
+and still declares the target account as a foreign account.
+
+Every network note the SDK builds carries `NoteExecutionHint.always()` on its
+`NetworkAccountTarget` attachment. A target built without the hint emits
+`NoteExecutionHint::None`, which tells the node not to schedule the note, and
+the note is never consumed.
 
 ## Pool reads (`pool/reads.ts`, `pool/decoding.ts`)
 
@@ -369,7 +388,7 @@ installs the standard `CodeInspection` component, installs
 `AccountComponent.createNetworkAuthComponents` with the fee schedule, and
 inserts the account into the client's local store. It does not deploy.
 
-`CodeInspection` (`miden-standards` 0.17.1) exposes `get_code_commitment`,
+`CodeInspection` exposes `get_code_commitment`,
 which the registry calls over FPI to verify the pool code at registration. The
 SDK compiles the component through the client's standards library and caches it
 per client, so the pool account's code commitment matches the value the
@@ -383,7 +402,7 @@ it cannot drift from a deployed pool. The account seed and the storage values
 do not affect it.
 
 `deployPoolAccount` consumes `fundingNoteId` as the pool's first transaction.
-A 0.17 network account rejects a transaction with no effect with
+A network account rejects a transaction with no effect with
 `ERR_NETWORK_ACCOUNT_TRANSACTION_HAS_NO_EFFECT`, so an empty scriptless deploy
 fails; consuming a funding note both commits the account and pays its first
 transaction fee from the received funds. The pool
@@ -395,7 +414,7 @@ client re-parses account references worker-side. `DeployOptions` forwards
 `createFeeFaucet` uses `FaucetType.FungibleFaucet` and creates a public
 fungible faucet. It is not the pool's network note fee asset: a pool's
 `feeFaucetId` must be the chain fee faucet (`client.feeFaucetId()`, USDCX on
-the 0.17 testnet) or the node never consumes the pool's notes. Use this helper
+the testnet) or the node never consumes the pool's notes. Use this helper
 only for application-level faucets, such as a launchpad token.
 
 `poolInitSlots({ token0Key, token1Key, registryId, lpFeeBps,
@@ -566,6 +585,7 @@ npm run build             # emits dist/ (ESM + CJS + d.ts)
 npm run test:wasm         # builds, then runs the WASM smoke test in plain Node
 npm run pool:commitment   # prints the accepted pool code commitment
 npm run registry:deploy   # builds, then creates and deploys the registry account
+npm run fees:collect      # builds, then sweeps pool or registry fees
 ```
 
 `registry:deploy` uses the Node client with its filesystem store under
@@ -576,6 +596,21 @@ chain fee asset arrives, then builds the registry through
 registry is reused only when it accepts the configured pool code commitment and
 admits both registry note kinds; otherwise a fresh registry is deployed. No
 re-run is needed. See the script header for the environment variables.
+
+`fees:collect` sweeps protocol fees:
+
+```sh
+npm run fees:collect -- registry [--submit]
+npm run fees:collect -- pool <pool-id> [--submit]
+```
+
+Without `--submit` it is a dry run: it reports what is claimable, the
+destination, and the cost to the caller, and submits nothing. Each sweep emits
+the collect note and a FEE_SPONSORSHIP note for it. The sponsorship pays the
+transaction fee, because a collect note sweeps the whole balance of the asset it
+pays out. `PORT0_REGISTRY_ID` and `PORT0_FEE_FAUCET_ID` are required. The caller
+is the account named by `PORT0_OPERATOR`, or the first non-network account in
+`PORT0_STORE`.
 
 Copy `.env.example` to `.env` and fill it in. The scripts load `.env` from the
 repo root; real environment variables take precedence, and a missing file is
