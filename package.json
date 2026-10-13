@@ -1,5 +1,5 @@
 {
-  "name": "port0-sdk",
+  "name": "@port0.sh/sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for the port0.sh constant-product AMM. Builds XYK network notes, fee sponsorships, quotes, pool reads, and pool operations on top of @miden-sdk/miden-sdk.",
   "type": "module",
@@ -10,20 +10,32 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     }
   },
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
   "repository": {
     "type": "git",
-    "url": "rad://z36yP8bg7ivZT6ZnnUyAvRTZvisL9"
+    "url": "git+https://github.com/port0-sh/port0_sdk.git"
+  },
+  "homepage": "https://github.com/port0-sh/port0_sdk#readme",
+  "bugs": {
+    "url": "https://github.com/port0-sh/port0_sdk/issues"
   },
   "author": "mico <mic0@mic0.dev>",
   "keywords": [
@@ -48,7 +60,7 @@
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "peerDependencies": {
-    "@miden-sdk/miden-sdk": "^0.17.0"
+    "@miden-sdk/miden-sdk": "0.17.1"
   },
   "devDependencies": {
     "@miden-sdk/miden-sdk": "0.17.1",

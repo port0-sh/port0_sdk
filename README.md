@@ -1,4 +1,4 @@
-# port0-sdk
+# port0.sh SDK
 
 TypeScript SDK for the port0.sh constant-product AMM. It wraps
 `@miden-sdk/miden-sdk` and owns every Miden-specific step: compiled contract
@@ -17,7 +17,7 @@ the registry pays that transaction's fee from its own vault.
 ## Install
 
 ```
-npm install port0-sdk @miden-sdk/miden-sdk@0.17.1
+npm install @port0.sh/sdk @miden-sdk/miden-sdk@0.17.1
 ```
 
 The SDK peers on `@miden-sdk/miden-sdk@^0.17.0` and is developed and tested
@@ -27,7 +27,7 @@ against `0.17.1`. Pin the exact version the testnet runs.
 
 ```ts
 import { MidenClient } from "@miden-sdk/miden-sdk";
-import { XykClient, deadlineFrom } from "port0-sdk";
+import { XykClient, deadlineFrom } from "@port0.sh/sdk";
 
 const client = await MidenClient.create({
   rpcUrl: "https://rpc.testnet.miden.io/",
