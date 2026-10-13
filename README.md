@@ -572,16 +572,28 @@ npm run registry:deploy   # builds, then creates and deploys the registry accoun
 `~/.miden/stores/<PORT0_STORE>/`. It is interactive: when the operator
 wallet is missing or underfunded it prints the address and polls until the
 chain fee asset arrives, then builds the registry through
-`createRegistryAccount`, funds it, and consumes the funding note. No re-run is
-needed. See the script header for the environment variables.
+`createRegistryAccount`, funds it, and consumes the funding note. A stored
+registry is reused only when it accepts the configured pool code commitment and
+admits both registry note kinds; otherwise a fresh registry is deployed. No
+re-run is needed. See the script header for the environment variables.
 
 Copy `.env.example` to `.env` and fill it in. The scripts load `.env` from the
 repo root; real environment variables take precedence, and a missing file is
 not an error.
 
-For the full stack bring-up and the pool deployment flow, see the `RUNBOOK.md`
-in the `port0_app` repository.
+For the full stack bring-up and the pool deployment flow, see the
+[runbook](https://docs.port0.sh/operations/runbook.html).
 
 The WASM smoke test runs as a plain Node process (`test/wasm-smoke.mjs`) rather
 than under vitest: the web-sdk native module is unreliable inside vitest's
 worker pool.
+
+## Source
+
+Radicle is the canonical source. GitHub and npm are mirrors.
+
+| Source | Location |
+| --- | --- |
+| Radicle | https://radicle.network/nodes/iris.radicle.network/rad%3Az3qSaS569gAZiHRtjiAuxvrCWzhgp |
+| GitHub | https://github.com/port0-sh/port0_sdk |
+| npm | https://www.npmjs.com/package/@port0.sh/sdk |
