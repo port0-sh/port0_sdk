@@ -46,7 +46,7 @@ function buildNetworkNote(input: {
   inputs: bigint[];
   assets: { token: AccountId; amount: bigint }[];
 }): Note {
-  const { FeltArray } = wasmModule();
+  const { FeltArray, NoteExecutionHint } = wasmModule();
   const noteAssets = new NoteAssets(
     input.assets.map((asset) => new FungibleAsset(asset.token, asset.amount)),
   );
@@ -61,7 +61,14 @@ function buildNetworkNote(input: {
       new FeltArray(input.inputs.map((value) => new Felt(value))),
     ),
   );
-  const target = new NetworkAccountTarget(input.target);
+  // The execution hint must be explicit. A target built without one emits
+  // `NoteExecutionHint::None`, which tells the node not to schedule the note,
+  // and the note is never consumed. `Always` is the hint the canonical network
+  // note carries, and the one the pool's and registry's notes require.
+  const target = new NetworkAccountTarget(
+    input.target,
+    NoteExecutionHint.always(),
+  );
   return Note.withAttachments(noteAssets, metadata, recipient, [
     target.toAttachment(),
   ]);

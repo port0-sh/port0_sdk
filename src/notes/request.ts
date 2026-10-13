@@ -90,3 +90,48 @@ export async function ownOutputNotesRequest(
     .extendAdviceMap(adviceMap)
     .build();
 }
+
+/**
+ * Wraps `notes` as own output notes of a transaction the client signs itself.
+ *
+ * The twin of `ownOutputNotesRequest`, for an account whose key the client
+ * holds. That one declares the multisig `MultisigAuthArgs` preimage a wallet
+ * reads, including the conversion info a wallet needs. A local account does not
+ * read a preimage: it signs, and the client attaches that signature along with
+ * the conversion info it fetched itself. Declaring the multisig preimage for a
+ * local sender puts two conversion infos in play and the kernel rejects the
+ * transaction with "conversion info loaded from the advice map does not match
+ * the commitment provided via the auth args". So this variant declares neither
+ * auth args nor block numbers, and leaves both to the client.
+ *
+ * The target account is still declared as a foreign account: the kernel prices
+ * the emitted network note by calling `estimate_note_fee` on it.
+ */
+export async function outputNotesRequest(
+  client: MidenClient,
+  notes: Note[],
+  targetAccountId: AccountId,
+): Promise<TransactionRequest> {
+  const {
+    AccountStorageRequirements,
+    ForeignAccount,
+    ForeignAccountArray,
+    NoteArray,
+    TransactionRequestBuilder,
+  } = wasmModule();
+
+  const outputs = new NoteArray();
+  for (const note of notes) {
+    outputs.push(note);
+  }
+
+  const targets = new ForeignAccountArray();
+  targets.push(
+    ForeignAccount.public(targetAccountId, new AccountStorageRequirements()),
+  );
+
+  return new TransactionRequestBuilder()
+    .withOwnOutputNotes(outputs)
+    .withForeignAccounts(targets)
+    .build();
+}
