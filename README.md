@@ -8,12 +8,12 @@ transaction request assembly.
 
 A pool is a public network account. The pool consumes four XYK notes (`mint`,
 `burn`, `swap`, `collect`). The registry consumes two: `register`, and
-`registry-collect`, which sweeps the register fees the registry has accumulated.
-A pool note travels with a FEE_SPONSORSHIP note that pays the pool's configured
-note consumption fee, and the register note is sponsored the same way against
-the registry's fee. `registry-collect` is unsponsored and priced at zero; the
-registry's `collect` leaves the transaction's own fee in its vault, so it pays
-that fee from the swept balance.
+`registry-collect`, which sweeps the registry's whole balance.
+Every network note travels with a FEE_SPONSORSHIP note. Every note kind is
+priced at the protocol maximum (210 base units at the current base fee), so the
+sponsorship always covers the actual transaction fee; the remainder stays with
+the account and a later collect sweeps it. The registry's `collect` also leaves
+the transaction's own fee in its vault.
 
 ## Install
 
@@ -42,7 +42,7 @@ const xyk = XykClient.from(client);
 const pool = xyk.pool({
   poolId,
   feeFaucetId,
-  noteFees: { swap: 133n }, // fee schedule fixed at pool creation
+  noteFees: { swap: 210n }, // protocol maximum; fixed at pool creation
 });
 
 const state = await pool.state();
@@ -79,6 +79,7 @@ type SerialNumber = Word4;
 | `MAX_AMOUNT` | `1n << 57n` | Upper bound on every reserve, amount, and `lp_supply`. |
 | `MINIMUM_LIQUIDITY` | `1000n` | LP tokens locked permanently on the first mint. |
 | `FEE_DENOMINATOR` | `10_000n` | Basis-point denominator for both fees. |
+| `MAX_TX_FEE` | `210n` | Protocol maximum transaction fee at the current base fee (`7 x 30`); the floor for every note sponsorship. |
 | `SLOT_PREFIX` | `"port0::port0"` | Storage slot name prefix shared by all pool slots. |
 | `REGISTRY_SLOT_PREFIX` | `"pool_registry::pool_registry"` | Storage slot name prefix shared by all registry slots. |
 
@@ -237,9 +238,9 @@ pool collect must include token0 and token1 to pay the protocol pot; a registry
 collect names the assets whose whole balance it sweeps.
 
 A registry admits two note kinds, and `createRegistryAccount` prices both in the
-network auth it installs: `register` at the caller's `registerFee`, and
-`registry-collect` at zero, since collection is permissionless and unsponsored.
-The registry's `collect` leaves the transaction's own fee in its vault
+network auth it installs, each at the protocol maximum: `register` at
+`max(registerFee, MAX_TX_FEE)` and `registry-collect` at `MAX_TX_FEE`. The
+registry's `collect` also leaves the transaction's own fee in its vault
 (`tx::compute_fee`), so the sweep can drain the fee asset and the registry still
 pays the epilogue fee. Every admitted
 script root must be priced. A root the fee policy does not price aborts fee
@@ -487,7 +488,8 @@ to a wallet adapter; set `submit: true` to send it through the `MidenClient`.
 `deadline`, optional `serial`, `tag`. `MintParams`: `sender`, `recipient`,
 `amount0`, `amount1`, `slippageBps`, `deadline`, optional `serial`, `tag`.
 `BurnParams`: `sender`, `recipient`, `amountLp`, `slippageBps`, `deadline`,
-optional `serial`, `tag`. `CollectParams`: `sender`, optional `serial`.
+optional `serial`, `tag`. `CollectParams`: `sender`, optional `assetKeys`
+(defaults to every fungible asset the pool's vault holds), optional `serial`.
 `RegisterPoolParams`: `sender`, `poolId`, `asset0`, `asset1`.
 
 Helpers:
