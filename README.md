@@ -314,9 +314,9 @@ fetchPoolState(getAccount, poolId): Promise<PoolState>
 pool's stored `reserves` word, matching the contract's `get_reserves`; the vault
 is asserted to cover the reserves plus the protocol pot. A credit the contract
 did not create is never a reserve. It throws `NOT_A_POOL` when the token asset
-keys are missing or zero, `MISSING_SLOT` when the reserves slot is absent (a
-pool that predates the stored-reserves upgrade), and `INVARIANT` when the vault
-does not cover the recorded reserves and protocol pot.
+keys are missing or zero, `MISSING_SLOT` when the reserves slot is absent, and
+`INVARIANT` when the vault does not cover the recorded reserves and protocol
+pot.
 
 `PoolState` fields: `accountId`, `token0Key`, `token1Key`, `token0FaucetId`,
 `token1FaucetId`, `lpSupply`, `fees` (`lpFeeBps`, `protocolFeeShareBps`),

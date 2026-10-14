@@ -102,12 +102,11 @@ export function decodePoolState(account: Account): PoolState {
   );
   const reservesWord = readWord(storage, POOL_SLOTS.reserves);
   if (!reservesWord) {
-    // A pool deployed before the stored-reserves upgrade has no such slot and
-    // its reserves cannot be recovered from the vault without misreading a
-    // stray credit. Report it instead of guessing.
+    // Without the slot, the reserves cannot be recovered from the vault
+    // without misreading a stray credit. Report it instead of guessing.
     throw new XykError(
       "MISSING_SLOT",
-      `account ${account.id().toString()} has no reserves slot; it predates the stored-reserves upgrade`,
+      `account ${account.id().toString()} has no reserves slot; it is not a port0 pool`,
     );
   }
   const reserves = decodeReservesWord(reservesWord);
