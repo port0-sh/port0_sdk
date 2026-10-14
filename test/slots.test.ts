@@ -14,7 +14,7 @@ const token0Key = [1n, 2n, 3n, 4n] as const;
 const token1Key = [5n, 6n, 7n, 8n] as const;
 
 describe("poolInitSlots", () => {
-  it("declares all 10 slots with the creation-time values", () => {
+  it("declares all 11 slots with the creation-time values", () => {
     const slots = poolInitSlots({
       token0Key,
       token1Key,
@@ -28,6 +28,7 @@ describe("poolInitSlots", () => {
       POOL_SLOTS.token0AssetKey,
       POOL_SLOTS.token1AssetKey,
       POOL_SLOTS.lpSupply,
+      POOL_SLOTS.reserves,
       POOL_SLOTS.fees,
       POOL_SLOTS.p2idRoot,
       POOL_SLOTS.protocolPot,
@@ -41,14 +42,15 @@ describe("poolInitSlots", () => {
     // [0, 0, suffix, prefix].
     expect(slots[0]?.value).toEqual([1n, 2n, 3n, 4n]);
     expect(slots[1]?.value).toEqual([5n, 6n, 7n, 8n]);
-    expect(slots[3]?.value).toEqual([30n, 10n, 0n, 0n]);
-    expect(slots[9]?.value).toEqual([0n, 0n, 0xa2n, 0xa1n]);
+    expect(slots[4]?.value).toEqual([30n, 10n, 0n, 0n]);
+    expect(slots[10]?.value).toEqual([0n, 0n, 0xa2n, 0xa1n]);
 
-    // lp_supply and block_timestamp_last start at zero; the pot and the two
-    // cumulative prices start empty.
+    // lp_supply, reserves, and block_timestamp_last start at zero; the pot and
+    // the two cumulative prices start empty.
     expect(slots[2]?.value).toEqual([0n, 0n, 0n, 0n]);
-    expect(slots[8]?.value).toEqual([0n, 0n, 0n, 0n]);
-    for (const index of [5, 6, 7]) {
+    expect(slots[3]?.value).toEqual([0n, 0n, 0n, 0n]);
+    expect(slots[9]?.value).toEqual([0n, 0n, 0n, 0n]);
+    for (const index of [6, 7, 8]) {
       expect(slots[index]?.value, `slot ${index}`).toBeNull();
     }
   });

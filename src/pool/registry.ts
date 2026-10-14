@@ -29,7 +29,7 @@ import {
 import { contractPackageBytes } from "../artifacts.js";
 import { XykError } from "../errors.js";
 import { randomSeed, type Word4 } from "../math/encoding.js";
-import { REGISTRY_SLOTS } from "../constants.js";
+import { MAX_TX_FEE, REGISTRY_SLOTS } from "../constants.js";
 import { noteScript } from "../notes/scripts.js";
 import { word4FromWord, wordFromWord4 } from "../notes/word.js";
 import { wasmModule } from "../wasm.js";
@@ -276,11 +276,14 @@ export async function createRegistryAccount(
 
   // Every admitted script root must carry a fee: a root that the fee policy does
   // not price aborts fee estimation for that note, so the registry could never
-  // consume it. Collection is permissionless and no one sponsors it, so the
-  // registry prices it at zero and pays the network fee from its own vault.
+  // consume it. Both are priced at the protocol maximum, so the prepaid
+  // sponsorship always covers the actual transaction fee; the registry keeps the
+  // difference and a later collect sweeps it.
+  const registerFee =
+    params.registerFee > MAX_TX_FEE ? params.registerFee : MAX_TX_FEE;
   const feeEntries = [
-    new NoteScriptFee(noteScript("register").root(), params.registerFee),
-    new NoteScriptFee(noteScript("registry-collect").root(), 0n),
+    new NoteScriptFee(noteScript("register").root(), registerFee),
+    new NoteScriptFee(noteScript("registry-collect").root(), MAX_TX_FEE),
   ];
   const authComponents = AccountComponent.createNetworkAuthComponents(
     feeEntries,

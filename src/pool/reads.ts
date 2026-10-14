@@ -1,9 +1,10 @@
 /**
  * Pool state reads.
  *
- * `decodePoolState` decodes the ten storage slots plus the vault into a
- * typed `PoolState`. Reserves are the vault balances of token0 and token1
- * minus the protocol pot, matching the contract's `get_reserves`.
+ * `decodePoolState` decodes the eleven storage slots plus the vault into a
+ * typed `PoolState`. Reserves are the contract's stored accounting; the vault
+ * is asserted to cover the reserves plus the protocol pot. A credit the
+ * contract did not create is never a reserve.
  */
 import {
   Account,
@@ -13,13 +14,14 @@ import {
 } from "@miden-sdk/miden-sdk";
 import { POOL_SLOTS } from "../constants.js";
 import { XykError } from "../errors.js";
-import type { Word4 } from "../math/encoding.js";
+import { fungibleAssetIdWord, type Word4 } from "../math/encoding.js";
 import { word4FromWord } from "../notes/word.js";
 import {
   assetKeyToFaucetIdFelts,
   decodeAccountIdWord,
   decodeFeesWord,
   decodeProtocolPotWord,
+  decodeReservesWord,
   decodeScalarWord,
   decodeU128Word,
   isZeroWord4,
@@ -49,6 +51,12 @@ export interface PoolState {
   blockTimestampLast: bigint;
   reserve0: bigint;
   reserve1: bigint;
+  /**
+   * Asset key of every fungible asset the vault holds, token0 and token1
+   * first when present. The contract cannot enumerate its own vault, so a
+   * collect names the keys it sweeps; this is that list.
+   */
+  vaultAssetKeys: Word4[];
 }
 
 function readWord(storage: StorageView, name: string): Word4 | undefined {
@@ -92,6 +100,17 @@ export function decodePoolState(account: Account): PoolState {
   const pot = decodeProtocolPotWord(
     readWord(storage, POOL_SLOTS.protocolPot) ?? ZERO,
   );
+  const reservesWord = readWord(storage, POOL_SLOTS.reserves);
+  if (!reservesWord) {
+    // A pool deployed before the stored-reserves upgrade has no such slot and
+    // its reserves cannot be recovered from the vault without misreading a
+    // stray credit. Report it instead of guessing.
+    throw new XykError(
+      "MISSING_SLOT",
+      `account ${account.id().toString()} has no reserves slot; it predates the stored-reserves upgrade`,
+    );
+  }
+  const reserves = decodeReservesWord(reservesWord);
   const price0 = decodeU128Word(
     readWord(storage, POOL_SLOTS.price0CumulativeLast) ?? ZERO,
   );
@@ -106,12 +125,18 @@ export function decodePoolState(account: Account): PoolState {
   const token1FaucetId = accountIdFromFelts(assetKeyToFaucetIdFelts(token1Key));
 
   const vault = account.vault();
+  const vaultAssetKeys = vault
+    .fungibleAssets()
+    .map((asset) => fungibleAssetIdWord(asset.faucetId()));
   const vault0 = vault.getBalance(token0FaucetId);
   const vault1 = vault.getBalance(token1FaucetId);
-  if (vault0 < pot.amount0 || vault1 < pot.amount1) {
+  if (
+    vault0 < reserves.reserve0 + pot.amount0 ||
+    vault1 < reserves.reserve1 + pot.amount1
+  ) {
     throw new XykError(
       "INVARIANT",
-      "pool vault balance is below the recorded protocol pot",
+      "pool vault does not cover the recorded reserves and protocol pot",
     );
   }
 
@@ -132,8 +157,9 @@ export function decodePoolState(account: Account): PoolState {
     price0CumulativeLast: price0,
     price1CumulativeLast: price1,
     blockTimestampLast,
-    reserve0: vault0 - pot.amount0,
-    reserve1: vault1 - pot.amount1,
+    reserve0: reserves.reserve0,
+    reserve1: reserves.reserve1,
+    vaultAssetKeys,
   };
 }
 

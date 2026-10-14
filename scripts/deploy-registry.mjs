@@ -38,6 +38,7 @@ import {
   NetworkId,
 } from "@miden-sdk/miden-sdk";
 import {
+  MAX_TX_FEE,
   createRegistryAccount,
   deployRegistryAccount,
   noteScript,
@@ -46,8 +47,12 @@ import {
   wasmModule,
 } from "../dist/index.js";
 
-/** Measured per-transaction verification fee, in the chain fee asset. */
-const OPERATOR_TX_FEE = 133n;
+/**
+ * The operator's own funding transaction and the registry's first transaction each cost at most
+ * the protocol maximum; using it keeps the operator solvent whatever the actual fee is.
+ */
+const OPERATOR_TX_FEE = MAX_TX_FEE;
+const REGISTRY_FIRST_TX_FEE = MAX_TX_FEE;
 /** Poll interval for the funding wait. */
 const POLL_MS = 5_000;
 
@@ -108,7 +113,9 @@ async function main() {
   // The operator pays the funding transaction and sends the registry its
   // starting balance. Proceed with whatever the operator holds above the
   // transaction fee, capped at the requested fund amount.
-  const minimumBalance = OPERATOR_TX_FEE + 1n;
+  // The registry pays its first fee out of the funding note, so the operator must be able to
+  // send at least that fee on top of its own transaction fee.
+  const minimumBalance = OPERATOR_TX_FEE + REGISTRY_FIRST_TX_FEE;
   let balance = await operatorBalance(client, operator.id(), feeFaucet);
   if (balance < minimumBalance) {
     console.log("operator wallet");
@@ -287,15 +294,26 @@ async function resolveRegistry(client, accounts, operator, config) {
 async function operatorBalance(client, accountId, feeFaucet) {
   await syncWithRetry(client);
 
+  // Only the fee-asset notes matter. An asset-less note (a collect or config
+  // note that landed here) cannot credit the vault, and consuming it costs a
+  // fee the operator may not have before the funding note is claimed.
   const available = await client.notes.listAvailable({
     account: accountId.toString(),
   });
-  if (available.length > 0) {
-    const result = await client.transactions.consumeAll({
+  const funding = available.filter((note) =>
+    note
+      .details()
+      .assets()
+      .fungibleAssets()
+      .some((asset) => asset.faucetId().toString() === feeFaucet.toString()),
+  );
+  if (funding.length > 0) {
+    const result = await client.transactions.consume({
       account: accountId.toString(),
+      notes: funding.map((note) => note.id().toString()),
       waitForConfirmation: true,
     });
-    console.log(`  consumed ${result.consumed} incoming note(s)`);
+    console.log(`  consumed ${funding.length} incoming note(s)`);
     await syncWithRetry(client);
   }
 

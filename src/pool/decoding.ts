@@ -1,7 +1,7 @@
 /**
  * Pure decoders for the pool's storage words.
  *
- * The pool stores ten value slots; several encode structured data inside a
+ * The pool stores eleven value slots; several encode structured data inside a
  * single word. These functions take a four-limb word (`Word4`) and return the
  * decoded fields without touching WASM, so the layouts are unit-testable
  * against the contract's storage table.
@@ -35,6 +35,14 @@ export function decodeAccountIdWord(word: Word4): [bigint, bigint] {
 /** `lp_supply` / `block_timestamp_last` word: `[value, 0, 0, 0]`. */
 export function decodeScalarWord(word: Word4): bigint {
   return word[0];
+}
+
+/** `reserves` word: `[reserve0, reserve1, 0, 0]`. */
+export function decodeReservesWord(word: Word4): {
+  reserve0: bigint;
+  reserve1: bigint;
+} {
+  return { reserve0: word[0], reserve1: word[1] };
 }
 
 /** `protocol_pot` word: `[amount0, amount1, 0, 0]`. */

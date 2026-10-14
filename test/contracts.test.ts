@@ -34,11 +34,12 @@ describe("pool constants", () => {
     expect(FEE_DENOMINATOR).toBe(10_000n);
   });
 
-  it("declares the 10 pool storage slot names", () => {
+  it("declares the 11 pool storage slot names", () => {
     expect(Object.values(POOL_SLOTS)).toEqual([
       "port0::port0::token0_asset_key",
       "port0::port0::token1_asset_key",
       "port0::port0::lp_supply",
+      "port0::port0::reserves",
       "port0::port0::fees",
       "port0::port0::p2id_root",
       "port0::port0::protocol_pot",

@@ -27,6 +27,7 @@ export function poolInitSlots(params: {
     { name: POOL_SLOTS.token0AssetKey, value: params.token0Key },
     { name: POOL_SLOTS.token1AssetKey, value: params.token1Key },
     { name: POOL_SLOTS.lpSupply, value: [0n, 0n, 0n, 0n] },
+    { name: POOL_SLOTS.reserves, value: [0n, 0n, 0n, 0n] },
     // fees word: [lp_fee_bps, protocol_fee_share_bps, 0, 0]
     {
       name: POOL_SLOTS.fees,

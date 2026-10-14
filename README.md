@@ -11,8 +11,9 @@ A pool is a public network account. The pool consumes four XYK notes (`mint`,
 `registry-collect`, which sweeps the register fees the registry has accumulated.
 A pool note travels with a FEE_SPONSORSHIP note that pays the pool's configured
 note consumption fee, and the register note is sponsored the same way against
-the registry's fee. `registry-collect` is unsponsored and priced at zero, so
-the registry pays that transaction's fee from its own vault.
+the registry's fee. `registry-collect` is unsponsored and priced at zero; the
+registry's `collect` leaves the transaction's own fee in its vault, so it pays
+that fee from the swept balance.
 
 ## Install
 
@@ -81,15 +82,15 @@ type SerialNumber = Word4;
 | `SLOT_PREFIX` | `"port0::port0"` | Storage slot name prefix shared by all pool slots. |
 | `REGISTRY_SLOT_PREFIX` | `"pool_registry::pool_registry"` | Storage slot name prefix shared by all registry slots. |
 
-`POOL_SLOTS` names the ten exact value slots:
+`POOL_SLOTS` names the eleven exact value slots:
 
 ```ts
 POOL_SLOTS.token0AssetKey
 POOL_SLOTS.token1AssetKey       POOL_SLOTS.lpSupply
-POOL_SLOTS.fees                 POOL_SLOTS.p2idRoot
-POOL_SLOTS.protocolPot          POOL_SLOTS.price0CumulativeLast
-POOL_SLOTS.price1CumulativeLast POOL_SLOTS.blockTimestampLast
-POOL_SLOTS.registryId
+POOL_SLOTS.reserves             POOL_SLOTS.fees
+POOL_SLOTS.p2idRoot             POOL_SLOTS.protocolPot
+POOL_SLOTS.price0CumulativeLast POOL_SLOTS.price1CumulativeLast
+POOL_SLOTS.blockTimestampLast   POOL_SLOTS.registryId
 ```
 
 `REGISTRY_SLOTS` names the registry's three maps and four value slots:
@@ -191,9 +192,9 @@ Each function returns `bigint[]` in the exact order the note script asserts.
 | `mintNoteStorage` | 11 | pool, recipient, serial, tag, deadline, `minLpOut` |
 | `burnNoteStorage` | 12 | pool, recipient, serial, tag, deadline, `minAmount0`, `minAmount1` |
 | `swapNoteStorage` | 11 | pool, recipient, serial, tag, deadline, `minAmountOut` |
-| `collectNoteStorage` | 4 | serial |
+| `collectNoteStorage` | 6 + 4n | pool, serial, one asset key (4) per swept asset |
 | `registerNoteStorage` | 8 | registry, pool, asset0, asset1 |
-| `registryCollectNoteStorage` | 10 | registry, asset key (4), serial (4) |
+| `registryCollectNoteStorage` | 6 + 4n | registry, serial, one asset key (4) per swept asset |
 | `feeSponsorshipStorage` | 7 | feature note id (4), reclaimer `[suffix, prefix]`, reclaim height |
 
 Account ids inside layouts are `[prefix, suffix]`. The reclaimer in
@@ -229,14 +230,18 @@ defaults to `randomSerial()` and `tag` defaults to `accountTargetTag(recipient)`
 `asset1`. The produced note targets the registry and carries the 8-felt
 register layout and no assets.
 
-`buildRegistryCollectNote` takes `sender`, `registryId`, `assetKey`, and an
-optional `serial`. The produced note targets the registry and carries the
-10-felt registry-collect layout and no assets.
+`buildCollectNote` takes `sender`, `poolId`, `assetKeys`, and an optional
+`serial`. `buildRegistryCollectNote` takes `sender`, `registryId`, `assetKeys`,
+and an optional `serial`. Both target a network account and carry no assets. A
+pool collect must include token0 and token1 to pay the protocol pot; a registry
+collect names the assets whose whole balance it sweeps.
 
 A registry admits two note kinds, and `createRegistryAccount` prices both in the
 network auth it installs: `register` at the caller's `registerFee`, and
-`registry-collect` at zero, since collection is permissionless and unsponsored,
-so the registry pays that transaction's fee from its own vault. Every admitted
+`registry-collect` at zero, since collection is permissionless and unsponsored.
+The registry's `collect` leaves the transaction's own fee in its vault
+(`tx::compute_fee`), so the sweep can drain the fee asset and the registry still
+pays the epilogue fee. Every admitted
 script root must be priced. A root the fee policy does not price aborts fee
 estimation, so the node's builder never executes a note running it and the
 account's own auth procedure rejects that note as an input. The allowlist is
@@ -304,17 +309,21 @@ decodePoolState(account: Account): PoolState
 fetchPoolState(getAccount, poolId): Promise<PoolState>
 ```
 
-`decodePoolState` reads the ten value slots and the vault. Reserves equal the
-vault balances of token0 and token1 minus the protocol pot, matching the
-contract's `get_reserves`. It throws `NOT_A_POOL` when the token asset keys are
-missing or zero, and `INVARIANT` when a vault balance is below the recorded pot.
+`decodePoolState` reads the eleven value slots and the vault. Reserves are the
+pool's stored `reserves` word, matching the contract's `get_reserves`; the vault
+is asserted to cover the reserves plus the protocol pot. A credit the contract
+did not create is never a reserve. It throws `NOT_A_POOL` when the token asset
+keys are missing or zero, `MISSING_SLOT` when the reserves slot is absent (a
+pool that predates the stored-reserves upgrade), and `INVARIANT` when the vault
+does not cover the recorded reserves and protocol pot.
 
 `PoolState` fields: `accountId`, `token0Key`, `token1Key`, `token0FaucetId`,
 `token1FaucetId`, `lpSupply`, `fees` (`lpFeeBps`, `protocolFeeShareBps`),
 `registryId`, `p2idRoot`, `protocolPot` (`amount0`, `amount1`),
 `price0CumulativeLast`, `price1CumulativeLast`, `blockTimestampLast`,
-`reserve0`, `reserve1`. The protocol fee destination is not part of pool state:
-it lives on the registry and is read only when the pool collects.
+`reserve0`, `reserve1`, `vaultAssetKeys` (every fungible asset the vault holds).
+The protocol fee destination is not part of pool state: it lives on the registry
+and is read only when the pool collects.
 
 `pool/decoding.ts` exports the individual word decoders: `decodeFeesWord`,
 `decodeAccountIdWord`, `decodeScalarWord`, `decodeProtocolPotWord`,

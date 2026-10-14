@@ -57,16 +57,28 @@ export function swapNoteStorage(
   return [...poolNotePrefix(params), params.minAmountOut];
 }
 
-/** collect-note: 4 felts. No assets. */
-export function collectNoteStorage(serial: SerialNumber): bigint[] {
-  return [...serial];
+/** collect-note: `6 + 4n` felts. No assets. */
+export interface CollectNoteParams {
+  poolId: AccountIdLike;
+  serial: SerialNumber;
+  /** One asset key per asset the collect sweeps. */
+  assetKeys: readonly Word4[];
 }
 
-/** registry-collect-note: 10 felts. No assets. */
+export function collectNoteStorage(params: CollectNoteParams): bigint[] {
+  return [
+    ...accountIdFelts(params.poolId),
+    ...params.serial,
+    ...params.assetKeys.flatMap((key) => [...key]),
+  ];
+}
+
+/** registry-collect-note: `6 + 4n` felts. No assets. */
 export interface RegistryCollectNoteParams {
   registryId: AccountIdLike;
-  assetKey: Word4;
   serial: Word4;
+  /** One asset key per asset the collect sweeps. */
+  assetKeys: readonly Word4[];
 }
 
 export function registryCollectNoteStorage(
@@ -74,8 +86,8 @@ export function registryCollectNoteStorage(
 ): bigint[] {
   return [
     ...accountIdFelts(params.registryId),
-    ...params.assetKey,
     ...params.serial,
+    ...params.assetKeys.flatMap((key) => [...key]),
   ];
 }
 

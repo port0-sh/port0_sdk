@@ -18,6 +18,17 @@ export const MINIMUM_LIQUIDITY: bigint = 1000n;
 export const FEE_DENOMINATOR: bigint = 10_000n;
 
 /**
+ * Protocol maximum transaction fee, in fee-asset base units.
+ *
+ * The kernel charges `verification_base_fee * (ilog2(total_cycles) + 1)` and caps a transaction at
+ * `MAX_TX_EXECUTION_CYCLES = 2^29`, so the maximum is `base_fee * 30`. On the 0.17 testnet the
+ * base fee is 7, giving 210. Every note sponsorship is floored at this value: a network note can
+ * cost any amount up to it, and the executing account must hold the actual fee when the epilogue
+ * charges it. The surplus stays with the account and the next collect sweeps it.
+ */
+export const MAX_TX_FEE: bigint = 210n;
+
+/**
  * Storage slot name prefix shared by every `port0` component slot.
  *
  * Slot names are `<package_name>::<interface_segment>::<field_name>`; the
@@ -26,11 +37,13 @@ export const FEE_DENOMINATOR: bigint = 10_000n;
  */
 export const SLOT_PREFIX = "port0::port0";
 
-/** The 10 value slots declared by `Port0Storage`. */
+/** The 11 value slots declared by `Port0Storage`. */
 export const POOL_SLOTS = {
   token0AssetKey: `${SLOT_PREFIX}::token0_asset_key`,
   token1AssetKey: `${SLOT_PREFIX}::token1_asset_key`,
   lpSupply: `${SLOT_PREFIX}::lp_supply`,
+  /** Stored accounting the vault must cover: `[reserve0, reserve1, 0, 0]`. */
+  reserves: `${SLOT_PREFIX}::reserves`,
   fees: `${SLOT_PREFIX}::fees`,
   p2idRoot: `${SLOT_PREFIX}::p2id_root`,
   protocolPot: `${SLOT_PREFIX}::protocol_pot`,

@@ -142,8 +142,12 @@ assert.equal(burn.isNetworkNote(), true);
 assert.equal(burn.assets().fungibleAssets().length, 1);
 assert.equal(burn.assets().fungibleAssets()[0].faucetId().toString(), sender.toString());
 
-// Collect note: no assets.
-const collect = buildCollectNote({ sender, poolId: sender });
+// Collect note: no assets, one asset key in storage.
+const collect = buildCollectNote({
+  sender,
+  poolId: sender,
+  assetKeys: [[1n, 2n, 3n, 4n]],
+});
 assert.equal(collect.isNetworkNote(), true);
 assert.equal(collect.assets().fungibleAssets().length, 0);
 
@@ -151,12 +155,13 @@ assert.equal(collect.assets().fungibleAssets().length, 0);
 const registryCollect = buildRegistryCollectNote({
   sender,
   registryId: sender,
-  assetKey: [1n, 2n, 3n, 4n],
+  assetKeys: [[1n, 2n, 3n, 4n]],
 });
 assert.equal(registryCollect.isNetworkNote(), true);
 const collectItems = registryCollect.recipient().storage().items();
 assert.equal(collectItems.length, 10);
-assert.equal(collectItems[2].asInt(), 1n);
+// Layout: registry id (2), serial (4), then the asset key (4).
+assert.equal(collectItems[6].asInt(), 1n);
 
 // Fee sponsorship note: bound to the swap note id, one fee asset.
 const sponsor = buildFeeSponsorshipNote({

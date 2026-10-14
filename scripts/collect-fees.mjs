@@ -16,19 +16,18 @@
  *   pays them to the destination the registry names, read over FPI when its
  *   `collect` note is consumed.
  *
- * Both are permissionless. The script emits each collect note together with a
- * FEE_SPONSORSHIP note for it, the way this SDK submits every other feature
- * note, and lets the network transaction builder consume the pair. If that has
- * not happened by the end of the wait window, it builds, executes, and submits
- * that same transaction itself, since a network account's auth admits any
- * transaction whose consumed note script roots are allowlisted.
+ * Both are permissionless. The script lets the network transaction builder
+ * consume each collect note. If that has not happened by the end of the wait
+ * window, it builds, executes, and submits that same transaction itself, since
+ * a network account's auth admits any transaction whose consumed note script
+ * roots are allowlisted.
  *
- * The sponsorship is required, not a convenience. A collect note sweeps the
- * whole balance of the asset it pays out, and the registry's balance is held in
- * the fee asset, so the account's own vault is empty by the time the
- * transaction fee is settled and the transaction aborts with "failed to remove
- * the fungible asset from the vault". The sponsorship carries the fee instead.
- * The caller pays it, `TX_FEE` base units, on top of its own transaction fee.
+ * A pool collect travels with a FEE_SPONSORSHIP note, because the pool's fee
+ * schedule prices the collect root: the node requires the note fee to be
+ * prepaid, and the caller pays it on top of its own transaction fee. A registry
+ * prices its collect root at zero, so its sweep needs no sponsorship: the
+ * contract leaves the transaction's own fee in the vault (`tx::compute_fee`) and
+ * the registry pays it from the swept balance.
  *
  * Buying the fee asset is not required. A few hundred base units in the store's
  * account covers many sweeps at the measured 133 per transaction.
@@ -60,37 +59,23 @@ import {
   decodePoolState,
   fungibleAssetIdWord,
   outputNotesRequest,
+  MAX_TX_FEE,
   readRegistryFeePolicy,
 } from "../dist/index.js";
 
 /**
- * Funding floor for the caller, in the fee asset's base units: the largest
- * transaction fee measured on testnet (133). The fee is charged by the network
- * and varies between transactions, so a sweep that costs more fails loudly and
- * the figure is updated from the measurement the sweep prints.
+ * Fee asset a sweep needs: the collect note's sponsorship plus the caller's own
+ * emit transaction. Both are bounded by the protocol maximum, so the caller is
+ * solvent whatever the actual fee is. Both targets are sponsored, so the
+ * network account always holds the actual transaction fee at the epilogue.
  */
-const TX_FEE = 133n;
-/**
- * Transaction fee measured on the emitting transaction, in base units: the
- * difference the caller's balance showed across the registry sweep's emit.
- */
-const EMIT_FEE = 119n;
-/**
- * Every note kind a pool allowlists is priced at the measured transaction fee
- * when the pool is created, which is also the amount its collect note must be
- * sponsored with. A registry prices `registry-collect` at zero.
- */
-const POOL_COLLECT_FEE = 133n;
-/** Fee asset a registry sweep needs: sponsorship, no note fee, emit fee. */
-const REGISTRY_SWEEP_COST = TX_FEE + EMIT_FEE;
-/** Fee asset a pool sweep needs: sponsorship, the pool's note fee, emit fee. */
-const POOL_SWEEP_COST = TX_FEE + POOL_COLLECT_FEE + EMIT_FEE;
+const SWEEP_COST = MAX_TX_FEE * 2n;
 /**
  * The caller pays its own transaction fee when it claims an incoming funding
- * note, so a note of `N` adds `N - EMIT_FEE` to the vault. Funding requests add
+ * note, so a note of `N` adds `N - CLAIM_FEE` to the vault. Funding requests add
  * this so that one send covers the shortfall.
  */
-const CLAIM_FEE = EMIT_FEE;
+const CLAIM_FEE = MAX_TX_FEE;
 /** Poll interval while waiting for the caller to be funded. */
 const POLL_MS = 5_000;
 /** How long to wait for funding before giving up. */
@@ -438,7 +423,7 @@ async function printSentNoteIds(client, accountId) {
  * transaction fee is settled and the transaction aborts. The sponsorship note
  * carries the fee itself and is consumed together with the collect note, which
  * is how this SDK submits every other feature note. Sponsoring costs the caller
- * `TX_FEE` and leaves the swept pot whole for the destination.
+ * the protocol maximum and leaves the swept pot whole for the destination.
  */
 function sponsorCollect(sender, target, featureNote, feeFaucetId) {
   return buildFeeSponsorshipNote({
@@ -446,7 +431,7 @@ function sponsorCollect(sender, target, featureNote, feeFaucetId) {
     target,
     featureNote,
     feeFaucetId,
-    feeAmount: TX_FEE,
+    feeAmount: MAX_TX_FEE,
   });
 }
 
@@ -483,19 +468,30 @@ async function payOutDirectly(client, accountId, notes, describe) {
 }
 
 async function sweepRegistry(client, caller, registryId, feeFaucetId, submit) {
-  await callerFunding(client, caller, feeFaucetId, submit, REGISTRY_SWEEP_COST);
-  const before = await registryHeld(client, registryId, feeFaucetId);
+  await callerFunding(client, caller, feeFaucetId, submit, SWEEP_COST);
+  // The registry's vault is enumerated off-chain; the contract names the keys
+  // it sweeps. Every fungible asset is included, not just the fee asset.
+  await syncWithRetry(client);
+  const registry = await client.accounts.get(registryId.toString());
+  const assetKeys = registry
+    ? registry
+        .vault()
+        .fungibleAssets()
+        .map((asset) => fungibleAssetIdWord(asset.faucetId()))
+    : [];
+  const before = registry ? registry.vault().getBalance(feeFaucetId) : 0n;
   console.log(
     `registry ${registryId.toString()} holds ${money(before, await readFaucetMeta(client, feeFaucetId))}`,
   );
-  if (before === 0n) {
-    console.log("nothing to sweep: the registry holds no register fees.");
+  if (assetKeys.length === 0) {
+    console.log("nothing to sweep: the registry vault is empty.");
+    return;
   }
 
   const note = buildRegistryCollectNote({
     sender: caller.id(),
     registryId,
-    assetKey: fungibleAssetIdWord(feeFaucetId),
+    assetKeys,
   });
   const sponsor = sponsorCollect(caller.id(), registryId, note, feeFaucetId);
   const request = await outputNotesRequest(client, [note, sponsor], registryId);
@@ -541,7 +537,7 @@ async function sweepRegistry(client, caller, registryId, feeFaucetId, submit) {
 }
 
 async function sweepPool(client, caller, poolId, feeFaucetId, submit) {
-  await callerFunding(client, caller, feeFaucetId, submit, POOL_SWEEP_COST);
+  await callerFunding(client, caller, feeFaucetId, submit, SWEEP_COST);
   const account = await client.accounts.getOrImport(poolId.toString());
   const state = decodePoolState(account);
   const pot = state.protocolPot;
@@ -554,7 +550,15 @@ async function sweepPool(client, caller, poolId, feeFaucetId, submit) {
     console.log("nothing to sweep: the pool's protocol pot is empty.");
   }
 
-  const note = buildCollectNote({ sender: caller.id(), poolId });
+  // Sweep every fungible asset the vault holds: token0/token1 for the pot and
+  // any credit outside the reserves, and third assets in full. The state
+  // carries the list because the contract cannot enumerate its own vault.
+  const assetKeys = state.vaultAssetKeys;
+  if (assetKeys.length === 0) {
+    console.log("nothing to sweep: the pool vault is empty.");
+    return;
+  }
+  const note = buildCollectNote({ sender: caller.id(), poolId, assetKeys });
   const sponsor = sponsorCollect(caller.id(), poolId, note, feeFaucetId);
   const request = await outputNotesRequest(client, [note, sponsor], poolId);
 

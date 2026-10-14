@@ -19,8 +19,9 @@ import type {
   SwapQuote,
 } from "../math/quotes.js";
 import { amountOut, quoteBurn, quoteMint } from "../math/quotes.js";
-import type { SerialNumber } from "../math/encoding.js";
+import type { SerialNumber, Word4 } from "../math/encoding.js";
 import { XykError } from "../errors.js";
+import { MAX_TX_FEE } from "../constants.js";
 import {
   buildBurnNote,
   buildCollectNote,
@@ -64,7 +65,11 @@ function sponsor(
   featureNote: Note,
   kind: "mint" | "burn" | "swap" | "collect",
 ): { sponsorNote: Note; fee: bigint } {
-  const fee = noteFee(config.noteFees, kind);
+  // Floor at the protocol maximum: a note can cost up to it, and the executing
+  // account must hold the actual fee at the epilogue. The surplus is swept by a
+  // later collect.
+  const configured = noteFee(config.noteFees, kind);
+  const fee = configured > MAX_TX_FEE ? configured : MAX_TX_FEE;
   const sponsorNote = buildFeeSponsorshipNote({
     sender,
     target: config.poolId,
@@ -303,6 +308,12 @@ export function removeLiquidity(
 export interface CollectParams {
   /** The fee recipient account sending the note. */
   sender: AccountId;
+  /**
+   * Asset keys to sweep. Defaults to every fungible asset the pool's vault
+   * holds: token0 and token1 pay the protocol pot plus any credit outside the
+   * reserves, and any third asset is paid in full.
+   */
+  assetKeys?: readonly Word4[];
   serial?: SerialNumber;
 }
 
@@ -317,6 +328,7 @@ export function collectFees(
   const note = buildCollectNote({
     sender: params.sender,
     poolId: config.poolId,
+    assetKeys: params.assetKeys ?? state.vaultAssetKeys,
     serial: params.serial,
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "collect");
@@ -383,12 +395,15 @@ export function registerPool(
     asset0: params.asset0,
     asset1: params.asset1,
   });
+  // Floor at the protocol maximum; the register transaction runs foreign calls
+  // and can cost more than the configured note fee.
+  const fee = config.registerFee > MAX_TX_FEE ? config.registerFee : MAX_TX_FEE;
   const sponsorNote = buildFeeSponsorshipNote({
     sender: params.sender,
     target: config.registryId,
     featureNote: note,
     feeFaucetId: config.feeFaucetId,
-    feeAmount: config.registerFee,
+    feeAmount: fee,
   });
   return (async () => {
     const request = await ownOutputNotesRequest(
@@ -401,7 +416,7 @@ export function registerPool(
       note,
       sponsorNote,
       request,
-      fee: config.registerFee,
+      fee,
       feeFaucetId: config.feeFaucetId,
     };
   })();

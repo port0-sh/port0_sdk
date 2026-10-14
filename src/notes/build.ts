@@ -188,6 +188,12 @@ export interface CollectNoteInput {
   /** The fee recipient account sending the note. */
   sender: AccountId;
   poolId: AccountId;
+  /**
+   * Asset keys to sweep. The pool pays everything it holds above its stored
+   * reserves for each key: the protocol pot for token0/token1, the whole
+   * balance for any other asset. Include token0 and token1 to collect fees.
+   */
+  assetKeys: readonly Word4[];
   serial?: SerialNumber;
 }
 
@@ -196,7 +202,11 @@ export function buildCollectNote(input: CollectNoteInput): Note {
     sender: input.sender,
     target: input.poolId,
     script: noteScript("collect"),
-    inputs: collectNoteStorage(input.serial ?? randomSerial()),
+    inputs: collectNoteStorage({
+      poolId: input.poolId,
+      serial: input.serial ?? randomSerial(),
+      assetKeys: input.assetKeys,
+    }),
     assets: [],
   });
 }
@@ -205,14 +215,14 @@ export interface RegistryCollectNoteInput {
   /** Account executing the transaction that emits the note. */
   sender: AccountId;
   registryId: AccountId;
-  /** Asset key of the fee asset to sweep. */
-  assetKey: Word4;
+  /** Asset keys to sweep; the registry pays its whole balance of each. */
+  assetKeys: readonly Word4[];
   /** Optional note serial; defaults to a fresh random one. */
   serial?: Word4;
 }
 
 /**
- * Builds the note that makes the registry pay out its accumulated register fees.
+ * Builds the note that makes the registry pay out its accumulated balance.
  *
  * Collection is permissionless: the destination is the registry's protocol
  * account, so any sender can trigger it and none can redirect it.
@@ -224,8 +234,8 @@ export function buildRegistryCollectNote(input: RegistryCollectNoteInput): Note 
     script: noteScript("registry-collect"),
     inputs: registryCollectNoteStorage({
       registryId: input.registryId,
-      assetKey: input.assetKey,
       serial: input.serial ?? randomSerial(),
+      assetKeys: input.assetKeys,
     }),
     assets: [],
   });
