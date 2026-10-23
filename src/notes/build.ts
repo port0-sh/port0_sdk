@@ -241,6 +241,47 @@ export function buildRegistryCollectNote(input: RegistryCollectNoteInput): Note 
   });
 }
 
+export interface LaunchNoteInput {
+  /** Owner of the faucet: the only account whose note can launch it. */
+  sender: AccountId;
+  /** Network faucet the note targets. */
+  faucetId: AccountId;
+  /** Account that receives the whole supply. */
+  recipient: AccountId;
+  /** Output-note serial number; defaults to a random one. */
+  serial?: [bigint, bigint, bigint, bigint];
+  /** Output-note tag; defaults to the recipient's account target. */
+  tag?: bigint;
+}
+
+/**
+ * Builds the note that launches a network faucet: it mints the whole maximum
+ * supply and pays it to `recipient`, once. The faucet checks the note's sender
+ * against its owner, so a launch note from anybody else aborts.
+ */
+export function buildLaunchNote(input: LaunchNoteInput): Note {
+  return buildNetworkNote({
+    sender: input.sender,
+    target: input.faucetId,
+    script: noteScript("launch"),
+    inputs: [
+      input.faucetId.prefix().asInt(),
+      input.faucetId.suffix().asInt(),
+      input.recipient.prefix().asInt(),
+      input.recipient.suffix().asInt(),
+      ...(input.serial ?? serialInputs()),
+      input.tag ?? accountTargetTag(input.recipient),
+    ],
+    assets: [],
+  });
+}
+
+/** Four random felts for an output note serial number. */
+function serialInputs(): [bigint, bigint, bigint, bigint] {
+  const serial = randomSerial();
+  return [serial[0], serial[1], serial[2], serial[3]];
+}
+
 export interface RegistryConfigNoteInput {
   /** Account executing the transaction that emits the config note: the admin. */
   sender: AccountId;

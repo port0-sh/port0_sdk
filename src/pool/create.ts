@@ -21,6 +21,7 @@ import {
 } from "@miden-sdk/miden-sdk";
 import { contractPackageBytes } from "../artifacts.js";
 import { NOTE_FEES, POOL_AUTH_SLOTS } from "../constants.js";
+import { asAccountId } from "../utils/accountId.js";
 import { XykError } from "../errors.js";
 import { p2idRoot } from "../notes/build.js";
 import type { Word4 } from "../math/encoding.js";
@@ -58,15 +59,6 @@ function codeInspectionComponent(
     codeInspectionCache.set(client, cached);
   }
   return cached;
-}
-
-/** An account id from a parsed value, a hex string, or a bech32 address. */
-function asAccountId(value: AccountId | string): AccountId {
-  if (typeof value !== "string") return value;
-  const trimmed = value.trim();
-  return trimmed.startsWith("0x") || trimmed.startsWith("0X")
-    ? AccountId.fromHex(trimmed)
-    : AccountId.fromBech32(trimmed);
 }
 
 export interface CreatePoolAccountParams {

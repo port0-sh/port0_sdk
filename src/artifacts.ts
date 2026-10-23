@@ -25,4 +25,6 @@ export const CONTRACT_KINDS: readonly ContractKind[] = [
   "registry-collect",
   "register",
   "registry-config",
+  "network-faucet",
+  "launch",
 ] as const;

@@ -241,6 +241,37 @@ const FEE_SCHEDULE_SLOT =
   "miden::standards::fees::policies::basic_constant_fee::fee_schedule";
 
 /**
+ * Reads the registry's admin: the account whose registry-config notes may change
+ * the register fee. A wallet that is not this account cannot change it.
+ */
+export async function readRegistryAdmin(
+  getAccount: (id: AccountId) => Promise<Account | null>,
+  registryId: AccountId,
+): Promise<AccountId> {
+  const account = await getAccount(registryId);
+  if (!account) {
+    throw new XykError(
+      "POOL_NOT_FOUND",
+      `registry account ${registryId.toString()} not found`,
+    );
+  }
+  const word = registryStorage(account).getItem(REGISTRY_SLOTS.admin)?.word;
+  if (!word) {
+    throw new XykError("MISSING_SLOT", "the registry has no admin slot");
+  }
+  // The admin word is `[0, 0, suffix, prefix]`, each half a felt holding a u64.
+  // Rebuild the id from those halves: an account id's hex form is the
+  // concatenation of two unpadded u64s, so padding each half and joining them
+  // produces a different id.
+  const { Felt } = wasmModule();
+  const limbs = word.toU64s();
+  return AccountId.fromPrefixSuffix(
+    new Felt(BigInt(limbs[3] ?? 0n)),
+    new Felt(BigInt(limbs[2] ?? 0n)),
+  );
+}
+
+/**
  * Reads the registry's live register fee, in the fee asset's base units.
  *
  * The fee is an entry in the registry's own fee schedule, so after the admin

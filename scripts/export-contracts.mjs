@@ -44,6 +44,8 @@ const CONTRACTS = [
     dir: "registry-config-note",
     artifact: "registry_config_note.masp",
   },
+  { key: "network-faucet", dir: "network-faucet", artifact: "network-faucet.masp" },
+  { key: "launch", dir: "launch-note", artifact: "launch-note.masp" },
   {
     key: "registry-collect",
     dir: "registry-collect-note",
@@ -103,7 +105,9 @@ export type ContractKind =
   | "collect"
   | "register"
   | "registry-collect"
-  | "registry-config";
+  | "registry-config"
+  | "network-faucet"
+  | "launch";
 
 /**
  * Base64-encoded compiled Miden packages (.masp) for each contract.

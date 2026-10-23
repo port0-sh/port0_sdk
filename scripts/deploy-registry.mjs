@@ -16,19 +16,33 @@
  * `~/.miden/stores/<PORT0_STORE>/`, so a re-run resumes from that state,
  * and an already-deployed registry is reported and left alone.
  *
- * Environment (from the environment or a `.env` file in the current directory):
- *   PORT0_FEE_FAUCET_ID   required, chain fee faucet
- *   PORT0_POOL_COMMITMENT required, from `npm run pool:commitment`
- *   MIDEN_RPC_URL             default https://rpc.testnet.miden.io
- *   PORT0_REGISTER_FEE    default 119, register note fee in base units
- *   PORT0_FUND            default 1000, base units sent to the registry
- *   PORT0_STORE           default port0-registry
- *   PORT0_OPERATOR        optional, existing operator account id
- *   PORT0_PROVER          default testnet
- *   PORT0_NOTE_TRANSPORT  default testnet, for private notes
- *   PORT0_WAIT_SECS       default 600, funding wait timeout
+ * Every value that becomes registry policy or identifies an account is
+ * **required**: none of them has a default, because a wrong value here is
+ * permanent for that registry. Before spending anything the script prints them
+ * and asks the deployer to confirm, either by typing `deploy` or by passing
+ * `--yes` for an unattended run.
  *
- * Run: npm run build && node scripts/deploy-registry.mjs
+ * Environment (from the environment or a `.env` file in the current directory):
+ *   PORT0_FEE_FAUCET_ID         required, chain fee faucet
+ *   PORT0_POOL_COMMITMENT       required, from `npm run pool:commitment`
+ *   PORT0_OPERATOR              required, the keyed account that funds the registry
+ *   PORT0_REGISTRY_ADMIN        required, the account allowed to change the register fee
+ *   PORT0_REGISTER_FEE          required, register note price in base units
+ *   PORT0_PROTOCOL_FEE_TO       required, account that receives every pool's protocol fees
+ *   PORT0_PROTOCOL_FEE_SHARE_BPS required, protocol share of the LP fee, in bps
+ *   PORT0_LP_FEE_TIERS          required, comma-separated LP fee tiers in bps
+ *   PORT0_STORE                 required, client store holding the operator's key
+ *   MIDEN_RPC_URL               required, node RPC endpoint
+ *   PORT0_PROVER                required, prover (or `testnet`)
+ *   PORT0_NOTE_TRANSPORT        required, note transport (or `testnet`)
+ *   PORT0_FUND                  default 1000, base units sent to the registry
+ *   PORT0_WAIT_SECS             default 600, funding wait timeout
+ *
+ * The admin is the only account that can ever change the register fee, and it
+ * cannot be changed afterwards: it belongs to an account the deployer keeps, not
+ * to the throwaway operator that funds the deployment.
+ *
+ * Run: npm run build && node scripts/deploy-registry.mjs [--yes]
  */
 import { existsSync } from "node:fs";
 import {
@@ -36,6 +50,7 @@ import {
   AccountInterface,
   MidenClient,
   NetworkId,
+  Word,
 } from "@miden-sdk/miden-sdk";
 import {
   MAX_TX_FEE,
@@ -64,24 +79,30 @@ async function main() {
     process.loadEnvFile(".env");
   }
 
-  const feeFaucetId = required("PORT0_FEE_FAUCET_ID");
-  const poolCommitment = required("PORT0_POOL_COMMITMENT");
-  const rpcUrl = process.env.MIDEN_RPC_URL ?? "https://rpc.testnet.miden.io";
-  const registerFee = BigInt(process.env.PORT0_REGISTER_FEE ?? "119");
-  const protocolFeeTo = required("PORT0_PROTOCOL_FEE_TO");
-  const protocolFeeShareBps = BigInt(process.env.PORT0_PROTOCOL_FEE_SHARE_BPS ?? "1200");
-  const allowedLpFeeBps = (process.env.PORT0_LP_FEE_TIERS ?? "5,30,100")
+  const feeFaucetId = accountRef("PORT0_FEE_FAUCET_ID");
+  const poolCommitment = commitment("PORT0_POOL_COMMITMENT");
+  const rpcUrl = required("MIDEN_RPC_URL");
+  const registerFee = positive("PORT0_REGISTER_FEE");
+  const protocolFeeTo = accountRef("PORT0_PROTOCOL_FEE_TO");
+  const protocolFeeShareBps = bounded("PORT0_PROTOCOL_FEE_SHARE_BPS", 10_000n);
+  const allowedLpFeeBps = required("PORT0_LP_FEE_TIERS")
     .split(",")
-    .map((value) => BigInt(value.trim()));
+    .map((value) => {
+      const tier = BigInt(value.trim());
+      if (tier <= 0n || tier >= 10_000n) {
+        throw new Error(`PORT0_LP_FEE_TIERS: ${tier} is not a fee in (0, 10000) bps`);
+      }
+      return tier;
+    });
   // The registry pays its accumulated fees with the standard P2ID note this
   // SDK ships with. A different root would need a matching consumer.
   const registryP2idRoot = p2idRoot();
   const fundAmount = BigInt(process.env.PORT0_FUND ?? "1000");
-  const storeName = process.env.PORT0_STORE ?? "port0-registry";
-  const operatorRef = process.env.PORT0_OPERATOR;
-  const proverUrl = process.env.PORT0_PROVER ?? "testnet";
-  const noteTransportUrl =
-    process.env.PORT0_NOTE_TRANSPORT ?? "testnet";
+  const storeName = required("PORT0_STORE");
+  const operatorRef = accountRef("PORT0_OPERATOR");
+  const adminRef = accountRef("PORT0_REGISTRY_ADMIN");
+  const proverUrl = required("PORT0_PROVER");
+  const noteTransportUrl = required("PORT0_NOTE_TRANSPORT");
   const waitSecs = Number(process.env.PORT0_WAIT_SECS ?? "600");
 
   const client = await MidenClient.create({
@@ -95,11 +116,28 @@ async function main() {
 
   const feeFaucet = AccountId.fromHex(feeFaucetId);
   const accounts = await allAccounts(client);
-  const operator = await resolveOperator(client, accounts);
+  const operator = await resolveOperator(client);
+
+  await confirmPolicy({
+    rpcUrl,
+    proverUrl,
+    noteTransportUrl,
+    storeName,
+    operator,
+    admin: AccountId.fromHex(adminRef),
+    feeFaucet,
+    poolCommitment,
+    registerFee,
+    protocolFeeTo: AccountId.fromHex(protocolFeeTo),
+    protocolFeeShareBps,
+    allowedLpFeeBps,
+    fundAmount,
+  });
   const registry = await resolveRegistry(client, accounts, operator, {
-    // The account allowed to change the register fee. Defaults to the operator,
-    // which is the account that signs for the registry's own upkeep.
-    admin: process.env.PORT0_REGISTRY_ADMIN ?? operator.id().toString(),
+    // The account allowed to change the register fee. Required, and never the
+    // operator by default: the operator is throwaway, while losing the admin
+    // freezes the fee for the life of the registry.
+    admin: adminRef,
     poolCommitment,
     feeFaucetId,
     registerFee,
@@ -170,9 +208,116 @@ async function main() {
   console.log(`registry: ${registry.id().toString()}`);
 }
 
+/**
+ * Prints every value that becomes registry policy and asks the deployer to
+ * confirm it.
+ *
+ * These values are permanent for the registry: the accepted code commitment, the
+ * protocol share, the LP tiers, the payout account, and the admin cannot be
+ * changed after creation, and the admin cannot be rotated. A typo is therefore
+ * not a retry, it is a registry that has to be replaced, so the script stops here
+ * unless the deployer types the word or passes `--yes`.
+ */
+async function confirmPolicy(policy) {
+  const address = (id) =>
+    id.toBech32(NetworkId.testnet(), AccountInterface.BasicWallet);
+  const lines = [
+    ["registry, permanent", ""],
+    ["  pool code commitment", policy.poolCommitment],
+    ["  protocol fee recipient", `${policy.protocolFeeTo.toString()}  ${address(policy.protocolFeeTo)}`],
+    ["  protocol share of LP fee", `${policy.protocolFeeShareBps} bps`],
+    ["  LP fee tiers", policy.allowedLpFeeBps.map((tier) => `${tier}`).join(", ") + " bps"],
+    ["  register fee", `${policy.registerFee} base units`],
+    ["  admin (fee lever, no rotation)", `${policy.admin.toString()}  ${address(policy.admin)}`],
+    ["deployment", ""],
+    ["  operator (funds it, throwaway)", `${policy.operator.id().toString()}  ${address(policy.operator.id())}`],
+    ["  funding sent to registry", `${policy.fundAmount} base units`],
+    ["  fee faucet", policy.feeFaucet.toString()],
+    ["  client store", policy.storeName],
+    ["  rpc / prover / transport", `${policy.rpcUrl}  ${policy.proverUrl}  ${policy.noteTransportUrl}`],
+  ];
+  console.log("\nRegistry parameters:");
+  for (const [label, value] of lines) {
+    console.log(value === "" ? label : `  ${label.padEnd(38)} ${value}`);
+  }
+  console.log(
+    "\nThe commitment, the protocol recipient, the share, the tiers, and the admin\n" +
+      "cannot be changed after creation. The register fee can be changed, but only\n" +
+      "by the admin.\n",
+  );
+
+  if (process.argv.includes("--yes")) {
+    console.log("Confirmed with --yes.");
+    return;
+  }
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      "Not a terminal, so the policy cannot be confirmed. Re-run with --yes once the " +
+        "parameters above are verified.",
+    );
+  }
+  const readline = await import("node:readline/promises");
+  const prompt = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await prompt.question("Type `deploy` to confirm these parameters: ");
+    if (answer.trim() !== "deploy") {
+      throw new Error("Not confirmed; nothing was deployed.");
+    }
+  } finally {
+    prompt.close();
+  }
+}
+
 function required(name) {
   const value = process.env[name];
-  if (!value) throw new Error(`${name} is required`);
+  if (!value || value.trim() === "") {
+    throw new Error(
+      `${name} is required. Every registry policy value and account identity is set ` +
+        "explicitly; see .env.example. None of them has a default, because a wrong value " +
+        "is permanent for the registry.",
+    );
+  }
+  return value.trim();
+}
+
+/** A required account reference, normalised to its canonical hex form. */
+function accountRef(name) {
+  const value = required(name);
+  try {
+    const id =
+      value.startsWith("0x") || value.startsWith("0X")
+        ? AccountId.fromHex(value)
+        : AccountId.fromBech32(value);
+    return id.toString();
+  } catch {
+    throw new Error(
+      `${name} is not an account id: expected 0x-prefixed hex or a bech32 address, got "${value}"`,
+    );
+  }
+}
+
+/** A required pool code commitment: `0x` and 64 hex characters. */
+function commitment(name) {
+  const value = required(name);
+  if (!/^0x[0-9a-fA-F]{64}$/.test(value)) {
+    throw new Error(`${name} must be a 0x-prefixed 32-byte hex value`);
+  }
+  return value.toLowerCase();
+}
+
+/** A required positive integer. */
+function positive(name) {
+  const value = BigInt(required(name));
+  if (value <= 0n) throw new Error(`${name} must be positive`);
+  return value;
+}
+
+/** A required integer in `(0, max]`. */
+function bounded(name, max) {
+  const value = BigInt(required(name));
+  if (value < 0n || value > max) {
+    throw new Error(`${name} must be between 0 and ${max}`);
+  }
   return value;
 }
 
@@ -194,29 +339,18 @@ async function allAccounts(client) {
 }
 
 /** Resolves the operator wallet, creating one on first run. */
-async function resolveOperator(client, accounts) {
-  const operatorRef = process.env.PORT0_OPERATOR;
-  if (operatorRef) {
-    const account = await client.accounts.get(operatorRef);
-    if (!account) {
-      throw new Error(
-        `operator ${operatorRef} is not in this store (${process.env.PORT0_STORE ?? "default"}).\n` +
-          "The operator pays for the deployment, so this script has to sign a transaction as it: " +
-          "the account must be one whose keys this store holds. A wallet extension's account is " +
-          "private and cannot be driven from here.\n" +
-          "Leave PORT0_OPERATOR unset to have the script create and use a local operator, then " +
-          "fund the address it prints. The protocol fee recipient is only a payout address, so " +
-          "PORT0_PROTOCOL_FEE_TO may be any account, including your wallet.",
-      );
-    }
-    return account;
-  }
-  const existing = accounts.find((account) => !account.isNetworkAccount());
-  if (existing) return existing;
+async function resolveOperator(client) {
+  const operatorRef = required("PORT0_OPERATOR");
+  const account = await client.accounts.get(operatorRef);
+  if (account) return account;
 
-  const created = await client.accounts.create({ storage: "public" });
-  console.log("created operator wallet");
-  return created;
+  throw new Error(
+    `operator ${operatorRef} is not in this store (${process.env.PORT0_STORE}).\n` +
+      "The operator pays for the deployment, so this script has to sign a transaction as it: " +
+      "the account must be one whose keys this store holds. A wallet extension's account is " +
+      "private and cannot be driven from here. The admin, by contrast, may be any account, " +
+      "including your wallet, because only its id is stored.",
+  );
 }
 
 /**
@@ -272,14 +406,15 @@ async function resolveRegistry(client, accounts, operator, config) {
     // created from. A note that links this interface embeds those roots, so a
     // registry created before an interface change would never consume the
     // current register note; it must not be reused.
-    if (accepts(accepted) && pricesCurrentNotes(candidate)) return candidate;
-    if (accepts(accepted)) {
+    if (!accepts(accepted)) {
       console.log(
-        `stored registry ${candidate.id().toString()} does not price this build's notes; ` +
+        `stored registry ${candidate.id().toString()} does not accept this pool code ` +
+          `(${accepted.length} accepted, none equal to ${config.poolCommitment}); ` +
           "deploying a new registry",
       );
       continue;
     }
+    if (matchesDeployment(candidate, config)) return candidate;
     console.log(
       `stored registry ${candidate.id().toString()} does not accept this pool code ` +
         `(${accepted.length} accepted, none equal to ${config.poolCommitment}); ` +
@@ -313,6 +448,63 @@ async function resolveRegistry(client, accounts, operator, config) {
     p2idRoot: config.registryP2idRoot,
     authRoots,
   });
+}
+
+/**
+ * True when a stored registry matches this deployment: it prices and allowlists
+ * this build's register note, and its permanent policy equals the configured one.
+ *
+ * The policy values cannot be changed after creation, so reusing a registry with
+ * a different admin, payout account, share, or tier set would silently deploy
+ * something other than what the deployer just confirmed.
+ */
+function matchesDeployment(registry, config) {
+  if (!pricesCurrentNotes(registry)) return false;
+  const storage = registry.storage();
+  const value = (slot) =>
+    storage.getItem(`pool_registry::pool_registry::${slot}`)?.word;
+  const idOf = (word) => {
+    if (!word) return null;
+    const { Felt } = wasmModule();
+    const limbs = word.toU64s();
+    return AccountId.fromPrefixSuffix(
+      new Felt(BigInt(limbs[3] ?? 0n)),
+      new Felt(BigInt(limbs[2] ?? 0n)),
+    ).toString();
+  };
+  const compare = (label, stored, wanted) => {
+    if (stored !== null && stored.toLowerCase() === wanted.toLowerCase()) return true;
+    console.log(
+      `stored registry ${registry.id().toString()} has ${label} ${stored ?? "unset"}, ` +
+        `configured ${wanted}; deploying a new registry`,
+    );
+    return false;
+  };
+  if (!compare("admin", idOf(value("admin")), config.admin)) return false;
+  if (!compare("protocol fee recipient", idOf(value("protocol_fee_to")), config.protocolFeeTo)) {
+    return false;
+  }
+  const share = value("protocol_fee_share_bps");
+  const storedShare = share ? BigInt(share.toU64s()[0] ?? 0n).toString() : null;
+  if (!compare("protocol share", storedShare, config.protocolFeeShareBps.toString())) {
+    return false;
+  }
+  const tiers = new Set(
+    (storage.getMapEntries("pool_registry::pool_registry::allowed_lp_fee_bps") ?? []).map(
+      (entry) => BigInt(Word.fromHex(entry.key).toU64s()[0] ?? 0n).toString(),
+    ),
+  );
+  const wanted = new Set(config.allowedLpFeeBps.map((tier) => tier.toString()));
+  const same =
+    tiers.size === wanted.size && [...wanted].every((tier) => tiers.has(tier));
+  if (!same) {
+    console.log(
+      `stored registry ${registry.id().toString()} lists LP tiers ` +
+        `[${[...tiers].join(", ")}], configured [${[...wanted].join(", ")}]; deploying a new one`,
+    );
+    return false;
+  }
+  return true;
 }
 
 /**

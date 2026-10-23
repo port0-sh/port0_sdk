@@ -26,6 +26,7 @@ import {
 import type { AccountIdLike, Word4 } from "../math/encoding.js";
 import { wasmModule } from "../wasm.js";
 import { word4FromWord } from "./word.js";
+import { asAccountId } from "../utils/accountId.js";
 
 /** The 7-felt FEE_SPONSORSHIP storage layout. */
 export interface FeeSponsorshipStorageParams {
@@ -67,8 +68,8 @@ export interface FeeSponsorshipNoteInput {
   target: AccountId;
   /** The feature note this sponsorship pays for. */
   featureNote: Note;
-  /** Faucet whose asset denominates the fee. */
-  feeFaucetId: AccountId;
+  /** Faucet whose asset denominates the fee; hex or bech32 is accepted. */
+  feeFaucetId: AccountId | string;
   /** Fee amount, in the fee faucet asset's smallest unit. */
   feeAmount: bigint;
   /** Reclaimer; defaults to `sender`. */
@@ -87,7 +88,7 @@ export function buildFeeSponsorshipNote(input: FeeSponsorshipNoteInput): Note {
   });
 
   const assets = new NoteAssets([
-    new FungibleAsset(input.feeFaucetId, input.feeAmount),
+    new FungibleAsset(asAccountId(input.feeFaucetId), input.feeAmount),
   ]);
   const metadata = new NoteMetadata(
     input.sender,

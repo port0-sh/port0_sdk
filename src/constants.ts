@@ -53,6 +53,9 @@ export const NOTE_FEES: Record<NoteKind, bigint> = {
   // The admin's config note: the registry pays its own fee from accumulated
   // register fees, so a price change costs the admin nothing.
   "registry-config": 0n,
+  // The owner pays for the launch through a sponsorship, priced like a pool
+  // note: one mint-and-pay-out transaction.
+  launch: 126n,
 };
 
 /**

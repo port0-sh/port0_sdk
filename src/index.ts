@@ -15,6 +15,7 @@ export * from "./pool/decoding.js";
 export * from "./pool/reads.js";
 export * from "./pool/slots.js";
 export * from "./pool/create.js";
+export * from "./pool/networkFaucet.js";
 export * from "./pool/lpFaucet.js";
 export * from "./pool/registry.js";
 export * from "./pool/config.js";

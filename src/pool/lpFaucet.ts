@@ -184,17 +184,28 @@ export function lpFaucetSlots(
   symbol: string,
   name: string,
 ): PoolInitSlotDefinition[] {
+  return fungibleFaucetSlots({
+    symbol,
+    name,
+    decimals: LP_FAUCET_DECIMALS,
+    maxSupply: LP_FAUCET_MAX_SUPPLY,
+  });
+}
+
+/** The standards' faucet slots for arbitrary metadata. */
+export function fungibleFaucetSlots(params: {
+  symbol: string;
+  name: string;
+  decimals: number;
+  maxSupply: bigint;
+}): PoolInitSlotDefinition[] {
   const empty: Word4 = [0n, 0n, 0n, 0n];
+  const { symbol, name, decimals, maxSupply } = params;
   const [nameWord0 = empty, nameWord1 = empty] = encodeStringWords(name, 2);
   const slots: PoolInitSlotDefinition[] = [
     {
       name: `${SLOT_PREFIX}::fungible::token_config`,
-      value: [
-        0n,
-        LP_FAUCET_MAX_SUPPLY,
-        BigInt(LP_FAUCET_DECIMALS),
-        symbolFelt(symbol),
-      ],
+      value: [0n, maxSupply, BigInt(decimals), symbolFelt(symbol)],
     },
     { name: `${SLOT_PREFIX}::token_name_0`, value: nameWord0 },
     { name: `${SLOT_PREFIX}::token_name_1`, value: nameWord1 },
@@ -226,9 +237,28 @@ export function lpFaucetComponent(
 ): Promise<AccountComponent> {
   const symbol = lpTokenSymbol(params.token0Symbol, params.token1Symbol);
   const name = lpTokenName(params.token0Symbol, params.token1Symbol);
+  return standardFaucetComponent(client, {
+    symbol,
+    name,
+    decimals: LP_FAUCET_DECIMALS,
+    maxSupply: LP_FAUCET_MAX_SUPPLY,
+  });
+}
+
+/**
+ * The standards' basic fungible faucet component for arbitrary metadata.
+ *
+ * Compiled from the standards' MASM at the standards' namespace, so the account
+ * carries the procedure roots a wallet matches on to recognize a faucet and read
+ * its name, symbol, and decimals.
+ */
+export function standardFaucetComponent(
+  client: MidenClient,
+  params: { symbol: string; name: string; decimals: number; maxSupply: bigint },
+): Promise<AccountComponent> {
   return client.compile.component({
     code: LP_FAUCET_MASM,
     namespace: LP_FAUCET_NAMESPACE,
-    slots: toStorageSlots(lpFaucetSlots(symbol, name)),
+    slots: toStorageSlots(fungibleFaucetSlots(params)),
   });
 }
