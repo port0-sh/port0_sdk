@@ -38,6 +38,12 @@
  *   PORT0_FUND                  default 1000, base units sent to the registry
  *   PORT0_WAIT_SECS             default 600, funding wait timeout
  *
+ * `PORT0_NEW_REGISTRY=1` deploys another registry even when a stored one matches
+ * the configured policy. Without it, a matching registry is reused, and a
+ * registry whose permanent values differ is reported and replaced. An environment
+ * variable rather than a flag because `npm run registry:deploy --new` is consumed
+ * by npm itself; `npm run registry:deploy -- --new` works too.
+ *
  * The admin is the only account that can ever change the register fee, and it
  * cannot be changed afterwards: it belongs to an account the deployer keeps, not
  * to the throwaway operator that funds the deployment.
@@ -118,6 +124,31 @@ async function main() {
   const accounts = await allAccounts(client);
   const operator = await resolveOperator(client);
 
+  const config = {
+    forceNew:
+      process.env.PORT0_NEW_REGISTRY === "1" || process.argv.includes("--new"),
+    // The account allowed to change the register fee. Required, and never the
+    // operator by default: the operator is throwaway, while losing the admin
+    // freezes the fee for the life of the registry.
+    admin: adminRef,
+    poolCommitment,
+    feeFaucetId,
+    registerFee,
+    protocolFeeTo,
+    protocolFeeShareBps,
+    allowedLpFeeBps,
+    registryP2idRoot,
+  };
+
+  // Which registry this run touches is part of what the deployer confirms, so it
+  // is resolved before the prompt. A forced new registry is reported as such.
+  const existing = config.forceNew
+    ? null
+    : await findRegistry(client, accounts, operator, config);
+  if (config.forceNew) {
+    console.log("PORT0_NEW_REGISTRY is set: deploying another registry regardless of the stored ones");
+  }
+
   await confirmPolicy({
     rpcUrl,
     proverUrl,
@@ -132,20 +163,14 @@ async function main() {
     protocolFeeShareBps,
     allowedLpFeeBps,
     fundAmount,
+    reuseOf: existing ? existing.id().toString() : null,
   });
-  const registry = await resolveRegistry(client, accounts, operator, {
-    // The account allowed to change the register fee. Required, and never the
-    // operator by default: the operator is throwaway, while losing the admin
-    // freezes the fee for the life of the registry.
-    admin: adminRef,
-    poolCommitment,
-    feeFaucetId,
-    registerFee,
-    protocolFeeTo,
-    protocolFeeShareBps,
-    allowedLpFeeBps,
-    registryP2idRoot,
-  });
+
+  if (existing) {
+    console.log(`reusing registry ${existing.id().toString()}`);
+    return;
+  }
+  const registry = await createRegistryFor(client, config);
 
   if (!registry.isNew()) {
     console.log(`registry already deployed: ${registry.id().toString()}`);
@@ -229,6 +254,12 @@ async function confirmPolicy(policy) {
     ["  LP fee tiers", policy.allowedLpFeeBps.map((tier) => `${tier}`).join(", ") + " bps"],
     ["  register fee", `${policy.registerFee} base units`],
     ["  admin (fee lever, no rotation)", `${policy.admin.toString()}  ${address(policy.admin)}`],
+    [
+      "  registry action",
+      policy.reuseOf
+        ? `reuse ${policy.reuseOf}`
+        : "create a new registry",
+    ],
     ["deployment", ""],
     ["  operator (funds it, throwaway)", `${policy.operator.id().toString()}  ${address(policy.operator.id())}`],
     ["  funding sent to registry", `${policy.fundAmount} base units`],
@@ -364,13 +395,28 @@ async function resolveOperator(client) {
  * silently by a check that looked at the accepted code alone. A non-matching
  * account is reported and a fresh registry is deployed instead.
  */
-async function resolveRegistry(client, accounts, operator, config) {
-  const candidates = accounts.filter(
-    (account) =>
-      account.isNetworkAccount() &&
-      account.id().toString() !== operator.id().toString(),
-  );
-
+/**
+ * Finds a stored registry that matches this deployment, read-only.
+ *
+ * Returns the account to reuse, or null when a new registry must be created. The
+ * decision is printed before the confirmation prompt by the caller, so the
+ * deployer knows whether the run touches an existing registry or creates one.
+ */
+async function findRegistry(client, accounts, operator, config) {
+  // A registry is a network account whose allowlist admits the register note; a
+  // pool admits only its own four note kinds, so this filter keeps pools out of
+  // the candidate set instead of relying on the checks below to reject them.
+  const registerRoot = noteScript("register").root().toHex().toLowerCase();
+  const candidates = config.forceNew
+    ? []
+    : accounts.filter((account) => {
+        if (!account.isNetworkAccount()) return false;
+        if (account.id().toString() === operator.id().toString()) return false;
+        const admitted = (account.networkNoteAllowlist() ?? []).map((root) =>
+          root.toHex().toLowerCase(),
+        );
+        return admitted.includes(registerRoot);
+      });
   const expected = wasmModule()
     .Word.fromHex(config.poolCommitment)
     .toU64s()
@@ -415,12 +461,12 @@ async function resolveRegistry(client, accounts, operator, config) {
       continue;
     }
     if (matchesDeployment(candidate, config)) return candidate;
-    console.log(
-      `stored registry ${candidate.id().toString()} does not accept this pool code ` +
-        `(${accepted.length} accepted, none equal to ${config.poolCommitment}); ` +
-        "deploying a new registry",
-    );
   }
+  return null;
+}
+
+/** Creates the registry account in the client store; it is deployed by funding. */
+async function createRegistryFor(client, config) {
 
   // The auth roots every pool must carry, read from a reference pool build:
   // the registry compares them on every registration, so a pool with an
