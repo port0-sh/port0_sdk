@@ -1,6 +1,6 @@
 {
   "name": "@port0.sh/sdk",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "TypeScript SDK for the port0.sh constant-product AMM. Builds XYK network notes, fee sponsorships, quotes, pool reads, and pool operations on top of @miden-sdk/miden-sdk.",
   "type": "module",
   "license": "MIT",
@@ -62,7 +62,7 @@
     "registry:set-fee": "npm run build && node scripts/set-register-fee.mjs"
   },
   "peerDependencies": {
-    "@miden-sdk/miden-sdk": "^0.17.1"
+    "@miden-sdk/miden-sdk": "^0.17.6"
   },
   "devDependencies": {
     "@miden-sdk/miden-sdk": "0.17.6",
