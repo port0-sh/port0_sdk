@@ -21,8 +21,6 @@
 import { existsSync } from "node:fs";
 import { AccountId, MidenClient } from "@miden-sdk/miden-sdk";
 import {
-  MAX_TX_FEE,
-  buildFeeSponsorshipNote,
   buildRegistryConfigNote,
   outputNotesRequest,
   readRegistryRegisterFee,
@@ -72,16 +70,10 @@ const note = buildRegistryConfigNote({
   registryId,
   registerFee: fee,
 });
-// The config note is priced at zero, so the registry pays its own transaction
-// fee; the sponsorship below covers the admin's emit transaction.
-const sponsor = buildFeeSponsorshipNote({
-  sender: admin.id(),
-  target: registryId,
-  featureNote: note,
-  feeFaucetId,
-  feeAmount: MAX_TX_FEE,
-});
-const request = await outputNotesRequest(client, [note, sponsor], registryId);
+// The config note is priced at zero and the registry pays its own transaction
+// fee from the register fees it holds, so no sponsorship is attached: one would
+// donate its amount to the registry on every change.
+const request = await outputNotesRequest(client, [note], registryId);
 
 if (!submit) {
   console.log("dry run: the note is built and nothing is submitted. Pass --submit to apply.");
