@@ -97,9 +97,20 @@ POOL_SLOTS.price0CumulativeLast POOL_SLOTS.price1CumulativeLast
 POOL_SLOTS.blockTimestampLast   POOL_SLOTS.registryId
 ```
 
-`REGISTRY_SLOTS` names the registry's three maps and four value slots:
+`REGISTRY_SLOTS` names the registry's four maps and eleven value slots:
 `acceptedCodeCommitments`, `pools`, `assetsToPool`, `protocolFeeTo`,
-`protocolFeeShareBps`, `allowedLpFeeBps`, `p2idRoot`.
+`protocolFeeShareBps`, `allowedLpFeeBps`, `p2idRoot`,
+`expectedNoteAllowlistRoot`, `expectedTxScriptAllowlistRoot`,
+`expectedFeeScheduleRoot`, `expectedFeeAssetId`, `expectedActiveFeePolicyRoot`,
+`expectedAllowedFeePolicyRoots`, `admin`, `registerNoteRoot`.
+
+`POOL_AUTH_SLOTS` names the six auth and fee slots whose roots the registry pins:
+`noteAllowlistRoot`, `txScriptAllowlistRoot`, `feeScheduleRoot`, `feeAssetId`,
+`activeFeePolicyRoot`, `allowedFeePolicyRoots`.
+
+`POOL_COLLECT_FEE_HOLD`, `REGISTRY_COLLECT_FEE_HOLD`, and `COLLECT_MAX_KEYS` are
+generated from `contracts/collect-fee-hold.rs`, the file both contracts include,
+so the tooling prints the values the contracts enforce.
 
 ## Errors
 
@@ -110,7 +121,7 @@ POOL_SLOTS.blockTimestampLast   POOL_SLOTS.registryId
 
 `XykError` is thrown by the SDK layer above the math. Its `code` is one of
 `NOT_A_POOL`, `POOL_NOT_FOUND`, `POOL_NOT_CONFIGURED`, `MISSING_SLOT`,
-`INVARIANT`, `INVALID_ARGUMENT`, `UNSUPPORTED_OPERATION`.
+`AUTH_SLOT_MISSING`, `INVARIANT`, `INVALID_ARGUMENT`, `UNSUPPORTED_OPERATION`.
 
 ## Pure math (`math/quotes.ts`)
 
@@ -222,7 +233,7 @@ buildFeeSponsorshipNote(input: FeeSponsorshipNoteInput): Note
 p2idRoot(): Word4
 noteScript(kind: NoteKind): NoteScript
 POOL_NOTE_KINDS: readonly PoolNoteKind[]  // ["mint","burn","swap","collect"]
-NOTE_KINDS: readonly NoteKind[]           // POOL_NOTE_KINDS plus "register" and "registry-collect"
+NOTE_KINDS: readonly NoteKind[]           // POOL_NOTE_KINDS plus "register", "registry-collect", "registry-config"
 ```
 
 Common input fields: `sender`, `poolId`, `recipient` (where applicable),
@@ -238,14 +249,19 @@ register layout and no assets.
 `serial`. `buildRegistryCollectNote` takes `sender`, `registryId`, `assetKeys`,
 and an optional `serial`. Both target a network account and carry no assets. A
 pool collect must include token0 and token1 to pay the protocol pot; a registry
-collect names the assets whose whole balance it sweeps.
+collect names the assets whose whole balance it sweeps. The collect note scripts
+cap a note at four asset keys.
 
-A registry admits two note kinds, and `createRegistryAccount` prices both in the
-network auth it installs, each at the protocol maximum: `register` at
-`max(registerFee, MAX_TX_FEE)` and `registry-collect` at `MAX_TX_FEE`. The
-registry's `collect` also leaves the transaction's own fee in its vault
-(`tx::compute_fee`), so the sweep can drain the fee asset and the registry still
-pays the epilogue fee. Every admitted
+`buildRegistryConfigNote` takes `sender`, `registryId`, and `registerFee`. The
+note is accepted only from the registry admin, and only for the register note's
+schedule entry.
+
+A registry admits three note kinds, and `createRegistryAccount` prices all of
+them in the network auth it installs from `NOTE_FEES`: `register` at
+`registerFee`, which defaults to `NOTE_FEES.register` when zero,
+`registry-collect` at `NOTE_FEES["registry-collect"]`, and `registry-config` at
+zero, because the registry pays that fee from the register fees it holds. Every
+admitted
 script root must be priced. A root the fee policy does not price aborts fee
 estimation, so the node's builder never executes a note running it and the
 account's own auth procedure rejects that note as an input. The allowlist is
@@ -347,6 +363,7 @@ readRegistryPools(getAccount, registryId): Promise<RegistryPoolEntry[]>
 readRegistryFeePolicy(getAccount, registryId): Promise<RegistryFeePolicy>
 readRegistryPoolForAssets(getAccount, registryId, asset0, asset1): Promise<AccountId | null>
 readRegistryAcceptedCodeCommitments(getAccount, registryId): Promise<Word4[]>
+readRegistryRegisterFee(getAccount, registryId): Promise<bigint>
 parseAccountId(value: AccountId | string): AccountId
 REGISTRY_SLOTS
 ```
@@ -355,10 +372,12 @@ REGISTRY_SLOTS
 `{ acceptedPoolCodeCommitment: string, feeFaucetId: AccountId | string,
 registerFee: bigint, protocolFeeTo: AccountId | string,
 protocolFeeShareBps: bigint, allowedLpFeeBps: readonly bigint[],
-p2idRoot: Word4, seed?: Uint8Array }`. `createRegistryAccount` builds the
+p2idRoot: Word4, admin: AccountId | string, authRoots: PoolAuthRoots,
+seed?: Uint8Array }`. `createRegistryAccount` builds the
 registry, seeds `accepted_code_commitments` with the accepted pool code
-commitment, seeds `allowed_lp_fee_bps` with the permitted tiers, installs the
-network auth with both registry note kinds priced, and inserts the account.
+commitment, seeds `allowed_lp_fee_bps` with the permitted tiers, stores the
+expected pool auth roots and the admin, installs the network auth with the three
+registry note kinds priced, and inserts the account.
 `deployRegistryAccount` consumes a funding note as the first transaction.
 
 `RegistryConfig` is `{ registryId: AccountId, feeFaucetId: AccountId,
@@ -373,7 +392,9 @@ registry's `pools` map. The node returns at most 1000 entries per map in one
 read; a larger map must be paged with `SyncAccountStorageMaps`.
 
 `readRegistryFeePolicy` returns `{ protocolFeeTo, protocolFeeShareBps,
-allowedLpFeeBps }`. A pool's fee configuration is frozen at creation and
+allowedLpFeeBps }`. `readRegistryRegisterFee` returns the live register fee from
+the registry's fee schedule, which is authoritative after the admin changes it. A
+pool's fee configuration is frozen at creation and
 validated against this policy by `register`.
 
 `readRegistryPoolForAssets` returns the registered pool for an asset pair, or
@@ -398,8 +419,8 @@ protocolFeeShareBps: bigint, p2idRoot?: Word4, feeFaucetId: AccountId,
 noteFees?: PoolNoteFees, seed?: Uint8Array }`. The two symbols name the LP token
 (see below); the account's own code commitment is what the registry accepts.
 `PoolNoteFees` is `Partial<Record<PoolNoteKind, bigint>>`. `createPoolAccount`
-builds the pool component from the compiled package and the ten init slots,
-installs the standard fungible-faucet component so the LP token carries readable
+builds the pool component from the compiled package and the eleven init slots,
+installs the standard basic fungible faucet component so the LP token carries readable
 metadata (see below), installs the standard `CodeInspection` component, installs
 `AccountComponent.createNetworkAuthComponents` with the fee schedule, and
 inserts the account into the client's local store. It does not deploy.
@@ -410,8 +431,8 @@ A pool account is its own LP faucet: the contract derives the LP asset id from
 the pool's account id, and the kernel lets an account mint assets whose faucet
 id is its own. Without the standard faucet component the account exposes no
 name, symbol, or decimals, and wallets render the LP token as "Unknown". The
-SDK therefore compiles the standard fungible-faucet component
-(`miden-standards` 0.17.1, namespace
+SDK therefore compiles the standard basic fungible faucet component
+(`miden-standards`, namespace
 `miden::standards::components::faucets::fungible_faucet`) and installs it with
 the standards' storage layout:
 
@@ -577,7 +598,7 @@ wasmModule(): typeof import("@miden-sdk/miden-sdk")
 ```
 
 `ContractKind` is `"pool" | "registry" | "mint" | "burn" | "swap" | "collect" |
-"registry-collect" | "register"`. `wasmModule()` returns the full web-sdk module
+"registry-collect" | "register" | "registry-config"`. `wasmModule()` returns the full web-sdk module
 on both browser and Node; the Node entry does not re-export the array wrappers
 as named exports, and this accessor hides that difference.
 
@@ -625,6 +646,7 @@ npm run build             # emits dist/ (ESM + CJS + d.ts)
 npm run test:wasm         # builds, then runs the WASM smoke test in plain Node
 npm run pool:commitment   # prints the accepted pool code commitment
 npm run registry:deploy   # builds, then creates and deploys the registry account
+npm run registry:set-fee  # builds, then changes the registry's register fee
 npm run fees:collect      # builds, then sweeps pool or registry fees
 ```
 
@@ -634,7 +656,7 @@ wallet is missing or underfunded it prints the address and polls until the
 chain fee asset arrives, then builds the registry through
 `createRegistryAccount`, funds it, and consumes the funding note. A stored
 registry is reused only when it accepts the configured pool code commitment and
-admits both registry note kinds; otherwise a fresh registry is deployed. No
+admits all three registry note kinds; otherwise a fresh registry is deployed. No
 re-run is needed. See the script header for the environment variables.
 
 `fees:collect` sweeps protocol fees:
@@ -646,11 +668,22 @@ npm run fees:collect -- pool <pool-id> [--submit]
 
 Without `--submit` it is a dry run: it reports what is claimable, the
 destination, and the cost to the caller, and submits nothing. Each sweep emits
-the collect note and a FEE_SPONSORSHIP note for it. The sponsorship pays the
-transaction fee, because a collect note sweeps the whole balance of the asset it
-pays out. `PORT0_REGISTRY_ID` and `PORT0_FEE_FAUCET_ID` are required. The caller
+the collect note and a FEE_SPONSORSHIP note for it, at the schedule price for the
+note kind. A vault with more than four fungible assets is swept in one note per
+four keys. `PORT0_REGISTRY_ID` and `PORT0_FEE_FAUCET_ID` are required. The caller
 is the account named by `PORT0_OPERATOR`, or the first non-network account in
 `PORT0_STORE`.
+
+`registry:set-fee` changes the price of listing a pool:
+
+```sh
+npm run registry:set-fee -- <base-units> [--submit]
+```
+
+Without `--submit` it reads the live fee and reports the change. The note is
+accepted only from the registry's admin, so the caller account must be that
+admin. The registry pays the config note's own fee from the register fees it
+holds.
 
 Copy `.env.example` to `.env` and fill it in. The scripts load `.env` from the
 repo root; real environment variables take precedence, and a missing file is
