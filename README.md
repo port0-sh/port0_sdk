@@ -302,7 +302,15 @@ npm run build       # tsup: ESM, CJS, and types into dist/
 ```
 
 `pool:commitment`, `registry:deploy`, `registry:set-fee`, and `fees:collect` run the
-tooling in `scripts/`. They read the variables documented in `.env.example`.
+tooling in `scripts/`. They read the variables documented in `.env.example`, from
+`.env` or from the file named by `PORT0_ENV_FILE`, so one checkout can serve several
+chains with `.env.testnet` and `.env.mainnet`.
+
+Each chain needs its own `PORT0_STORE`: one client store cannot hold accounts from
+two chains, since the same account id can exist on both with different state. The
+scripts stamp a store with the chain it first ran against and refuse to open it for
+another, naming the store and the chain it belongs to. Addresses the tooling prints
+use the chain's own bech32 prefix, derived from the fee faucet the node reports.
 
 ## Source
 

@@ -9,7 +9,7 @@
  * `PORT0_OPERATOR`, `PORT0_STORE`, `MIDEN_RPC_URL`, `PORT0_PROVER`,
  * `PORT0_NOTE_TRANSPORT`, `PORT0_WAIT_SECS`.
  */
-import { existsSync } from "node:fs";
+import { loadEnvironment, assertStoreChain, chainOf } from "./network.mjs";
 import { AccountId, MidenClient } from "@miden-sdk/miden-sdk";
 import {
   buildRegistryConfigNote,
@@ -17,9 +17,7 @@ import {
   readRegistryRegisterFee,
 } from "../dist/index.js";
 
-if (existsSync(".env")) {
-  process.loadEnvFile(".env");
-}
+loadEnvironment();
 
 const fee = BigInt(process.argv[2] ?? "");
 if (process.argv[2] === undefined || fee <= 0n) {
@@ -32,6 +30,8 @@ const rpcUrl = process.env.MIDEN_RPC_URL ?? "https://rpc.testnet.miden.io";
 const storeName = process.env.PORT0_STORE ?? "port0-registry";
 const operatorRef = process.env.PORT0_OPERATOR;
 const feeFaucetId = AccountId.fromHex(required("PORT0_FEE_FAUCET_ID"));
+// One store per chain; a shared store cannot tell two chains' accounts apart.
+assertStoreChain(storeName, chainOf(feeFaucetId.toString()).name);
 
 const client = await MidenClient.create({
   rpcUrl,

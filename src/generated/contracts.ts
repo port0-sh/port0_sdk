@@ -54,4 +54,4 @@ export const CONTRACT_SHA256: Record<ContractKind, string> = {
 };
 
 /** Wall-clock time this file was generated. */
-export const GENERATED_AT: string = "2026-10-23T22:34:24.182Z";
+export const GENERATED_AT: string = "2026-10-23T22:35:46.830Z";

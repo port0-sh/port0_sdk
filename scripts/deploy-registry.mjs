@@ -14,7 +14,7 @@
  * `--yes` for an unattended run. Reads the variables documented in
  * `.env.example`; each is required unless that file shows a default.
  */
-import { existsSync } from "node:fs";
+import { chainOf, loadEnvironment, assertStoreChain } from "./network.mjs";
 import {
   AccountId,
   AccountInterface,
@@ -44,11 +44,7 @@ const REGISTRY_FIRST_TX_FEE = MAX_TX_FEE;
 const POLL_MS = 5_000;
 
 async function main() {
-  // Load `.env` from the current directory when present. Real environment
-  // variables take precedence; a missing file is not an error.
-  if (existsSync(".env")) {
-    process.loadEnvFile(".env");
-  }
+  loadEnvironment();
 
   const feeFaucetId = accountRef("PORT0_FEE_FAUCET_ID");
   const poolCommitment = commitment("PORT0_POOL_COMMITMENT");
@@ -110,6 +106,8 @@ async function main() {
   // Both pinned values are checked before anything is spent, and the block below
   // reports them as verified.
   const pinned = await verifyPinnedValues(client, config);
+  // One store per chain: a shared store cannot tell two chains' accounts apart.
+  assertStoreChain(storeName, chainOf(pinned.chainFeeFaucetId).name);
 
   const existing = config.forceNew
     ? null
@@ -156,7 +154,7 @@ async function main() {
   let balance = await operatorBalance(client, operator.id(), feeFaucet);
   if (balance < minimumBalance) {
     console.log("operator wallet");
-    console.log(`  address: ${addressOf(operator)}`);
+    console.log(`  address: ${addressOf(operator, chainOf(pinned.chainFeeFaucetId).name)}`);
     console.log(
       `  send fee asset: ${OPERATOR_TX_FEE + fundAmount} base units ` +
         `(${OPERATOR_TX_FEE} for the funding transaction, then ${fundAmount} to the registry, ` +
@@ -214,8 +212,9 @@ async function main() {
  * unless the deployer types the word or passes `--yes`.
  */
 async function confirmPolicy(policy) {
+  const chain = chainOf(policy.feeFaucet.toString());
   const address = (id) =>
-    id.toBech32(NetworkId.testnet(), AccountInterface.BasicWallet);
+    id.toBech32(NetworkId[chain.bech32](), AccountInterface.BasicWallet);
   const lines = [
     ["registry, permanent", ""],
     ["  pool code commitment", `${policy.poolCommitment}  (matches this build)`],
@@ -370,10 +369,13 @@ function bounded(name, max) {
   return value;
 }
 
-function addressOf(account) {
+/** The account's bech32 form, with the chain's own prefix. */
+function addressOf(account, chainName) {
+  const chain = chainOf(process.env.PORT0_FEE_FAUCET_ID ?? "");
+  const prefix = chain.name === chainName ? chain.bech32 : chainName;
   return account
     .id()
-    .toBech32(NetworkId.testnet(), AccountInterface.BasicWallet);
+    .toBech32(NetworkId[prefix](), AccountInterface.BasicWallet);
 }
 
 /** Loads every tracked account as a full account. */

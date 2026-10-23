@@ -15,7 +15,7 @@
  * Reads `PORT0_REGISTRY_ID`, `PORT0_FEE_FAUCET_ID`, `PORT0_OPERATOR`,
  * `PORT0_STORE`, `MIDEN_RPC_URL`, `PORT0_PROVER`, `PORT0_NOTE_TRANSPORT`.
  */
-import { existsSync } from "node:fs";
+import { loadEnvironment, assertStoreChain, chainOf } from "./network.mjs";
 import {
   AccountId,
   AccountInterface,
@@ -92,9 +92,7 @@ function asHex(value) {
 }
 
 async function main() {
-  if (existsSync(".env")) {
-    process.loadEnvFile(".env");
-  }
+  loadEnvironment();
 
   const target = process.argv[2];
   const submit = process.argv.includes("--submit");
@@ -110,6 +108,8 @@ async function main() {
   const rpcUrl = process.env.MIDEN_RPC_URL ?? "https://rpc.testnet.miden.io";
   const proverUrl = process.env.PORT0_PROVER ?? "testnet";
   const storeName = process.env.PORT0_STORE ?? "port0-registry";
+  // One store per chain; a shared store cannot tell two chains' accounts apart.
+  assertStoreChain(storeName, chainOf(process.env.PORT0_FEE_FAUCET_ID ?? "").name);
 
   const client = await MidenClient.create({
     rpcUrl,
@@ -210,9 +210,10 @@ async function waitForPayout(read, before, describe) {
 
 /** The caller's address, in the form a wallet sends to. */
 function addressOf(account) {
+  const chain = chainOf(process.env.PORT0_FEE_FAUCET_ID ?? "");
   return account
     .id()
-    .toBech32(NetworkId.testnet(), AccountInterface.BasicWallet);
+    .toBech32(NetworkId[chain.bech32](), AccountInterface.BasicWallet);
 }
 
 /** Syncs, re-fetching when a concurrent sync moved the store in between. */
