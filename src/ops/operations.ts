@@ -21,7 +21,6 @@ import type {
 import { amountOut, quoteBurn, quoteMint } from "../math/quotes.js";
 import type { SerialNumber, Word4 } from "../math/encoding.js";
 import { XykError } from "../errors.js";
-import { MAX_TX_FEE } from "../constants.js";
 import {
   buildBurnNote,
   buildCollectNote,
@@ -30,7 +29,7 @@ import {
   buildSwapNote,
 } from "../notes/build.js";
 import { buildFeeSponsorshipNote } from "../notes/feeSponsorship.js";
-import { ownOutputNotesRequest } from "../notes/request.js";
+import { outputNotesRequest, ownOutputNotesRequest } from "../notes/request.js";
 import { noteFee, type PoolConfig } from "../pool/config.js";
 import type { PoolState } from "../pool/reads.js";
 import { applySlippage, resolveSwapSide } from "./helpers.js";
@@ -40,6 +39,29 @@ export interface SubmitOptions {
   submit?: boolean;
   /** Poll until the submitted transaction is confirmed. */
   waitForConfirmation?: boolean;
+}
+
+/**
+ * Builds the emit request for the sender kind.
+ *
+ * A wallet sender reads the multisig auth-args preimage the request declares,
+ * so the wallet variant is used when the caller submits through an adapter. A
+ * local sender signs and the client attaches the conversion info itself, so
+ * declaring the preimage would put two conversion infos in play and the kernel
+ * rejects the transaction with "conversion info loaded from the advice map does
+ * not match the commitment provided via the auth args". Selection follows
+ * `options.submit`: a local sender is exactly the caller that asks the client
+ * to submit.
+ */
+function notesRequest(
+  client: MidenClient,
+  notes: Note[],
+  target: AccountId,
+  options?: SubmitOptions,
+) {
+  return options?.submit
+    ? outputNotesRequest(client, notes, target)
+    : ownOutputNotesRequest(client, notes, target);
 }
 
 export interface OperationOutput {
@@ -65,11 +87,10 @@ function sponsor(
   featureNote: Note,
   kind: "mint" | "burn" | "swap" | "collect",
 ): { sponsorNote: Note; fee: bigint } {
-  // Floor at the protocol maximum: a note can cost up to it, and the executing
-  // account must hold the actual fee at the epilogue. The surplus is swept by a
-  // later collect.
-  const configured = noteFee(config.noteFees, kind);
-  const fee = configured > MAX_TX_FEE ? configured : MAX_TX_FEE;
+  // The pool's fee schedule prices the kind; the sponsorship equals the price,
+  // which is the measured cost plus the pricer's one-cycle margin. A later
+  // collect sweeps the small remainder.
+  const fee = noteFee(config.noteFees, kind);
   const sponsorNote = buildFeeSponsorshipNote({
     sender,
     target: config.poolId,
@@ -154,10 +175,11 @@ export function swap(
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "swap");
   return (async () => {
-    const request = await ownOutputNotesRequest(
+    const request = await notesRequest(
       client,
       [note, sponsorNote],
       config.poolId,
+      options,
     );
     await submitIfRequested(client, params.sender, request, options);
     return {
@@ -221,10 +243,11 @@ export function addLiquidity(
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "mint");
   return (async () => {
-    const request = await ownOutputNotesRequest(
+    const request = await notesRequest(
       client,
       [note, sponsorNote],
       config.poolId,
+      options,
     );
     await submitIfRequested(client, params.sender, request, options);
     return {
@@ -286,10 +309,11 @@ export function removeLiquidity(
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "burn");
   return (async () => {
-    const request = await ownOutputNotesRequest(
+    const request = await notesRequest(
       client,
       [note, sponsorNote],
       config.poolId,
+      options,
     );
     await submitIfRequested(client, params.sender, request, options);
     return {
@@ -333,10 +357,11 @@ export function collectFees(
   });
   const { sponsorNote, fee } = sponsor(config, params.sender, note, "collect");
   return (async () => {
-    const request = await ownOutputNotesRequest(
+    const request = await notesRequest(
       client,
       [note, sponsorNote],
       config.poolId,
+      options,
     );
     await submitIfRequested(client, params.sender, request, options);
     return {
@@ -395,9 +420,9 @@ export function registerPool(
     asset0: params.asset0,
     asset1: params.asset1,
   });
-  // Floor at the protocol maximum; the register transaction runs foreign calls
-  // and can cost more than the configured note fee.
-  const fee = config.registerFee > MAX_TX_FEE ? config.registerFee : MAX_TX_FEE;
+  // The registry's fee schedule prices the register note; the sponsorship equals
+  // the configured price, which is the measured cost plus the pricer margin.
+  const fee = config.registerFee;
   const sponsorNote = buildFeeSponsorshipNote({
     sender: params.sender,
     target: config.registryId,
@@ -406,10 +431,11 @@ export function registerPool(
     feeAmount: fee,
   });
   return (async () => {
-    const request = await ownOutputNotesRequest(
+    const request = await notesRequest(
       client,
       [note, sponsorNote],
       config.registryId,
+      options,
     );
     await submitIfRequested(client, params.sender, request, options);
     return {

@@ -51,31 +51,47 @@ import {
   NoteAndArgs,
   NoteAndArgsArray,
   TransactionRequestBuilder,
+  Word,
 } from "@miden-sdk/miden-sdk";
 import { buildFeeSponsorshipNote } from "@port0.sh/sdk";
 import {
   buildCollectNote,
   buildRegistryCollectNote,
   decodePoolState,
+  COLLECT_MAX_KEYS,
+  POOL_COLLECT_FEE_HOLD,
+  REGISTRY_COLLECT_FEE_HOLD,
   fungibleAssetIdWord,
+  noteScript,
   outputNotesRequest,
-  MAX_TX_FEE,
+  NOTE_FEES,
   readRegistryFeePolicy,
 } from "../dist/index.js";
 
 /**
- * Fee asset a sweep needs: the collect note's sponsorship plus the caller's own
- * emit transaction. Both are bounded by the protocol maximum, so the caller is
- * solvent whatever the actual fee is. Both targets are sponsored, so the
- * network account always holds the actual transaction fee at the epilogue.
+ * Fee for one keyed-account transaction, in fee-asset base units. Measured on
+ * the 0.17 testnet: 119 for a consume or an emit. The caller is a keyed account,
+ * so its own transactions cost this.
  */
-const SWEEP_COST = MAX_TX_FEE * 2n;
+const KEYED_TX_FEE = 119n;
+
+/*
+ * The fee-asset reserves the contracts hold, imported from the SDK's generated
+ * fees module, which is parsed from `contracts/collect-fee-hold.rs`. The printed
+ * payout estimate therefore uses the value the contracts enforce.
+ */
+
+/**
+ * Fee asset a sweep needs: the collect note's sponsorship (the pool's schedule
+ * price) plus the caller's own emit transaction.
+ */
+const SWEEP_COST = NOTE_FEES.collect + KEYED_TX_FEE;
 /**
  * The caller pays its own transaction fee when it claims an incoming funding
  * note, so a note of `N` adds `N - CLAIM_FEE` to the vault. Funding requests add
  * this so that one send covers the shortfall.
  */
-const CLAIM_FEE = MAX_TX_FEE;
+const CLAIM_FEE = KEYED_TX_FEE;
 /** Poll interval while waiting for the caller to be funded. */
 const POLL_MS = 5_000;
 /** How long to wait for funding before giving up. */
@@ -373,6 +389,15 @@ async function readFaucetMeta(client, faucetId) {
   return meta;
 }
 
+/** Splits `items` into consecutive batches of at most `size`. */
+function chunk(items, size) {
+  const batches = [];
+  for (let index = 0; index < items.length; index += size) {
+    batches.push(items.slice(index, index + size));
+  }
+  return batches;
+}
+
 /** Prints an amount in units and base units, e.g. `0.000181 USDCX (181 base units)`. */
 function money(value, meta) {
   const raw = `${value} base units`;
@@ -422,17 +447,47 @@ async function printSentNoteIds(client, accountId) {
  * registry that asset is the fee asset, so the vault is empty by the time the
  * transaction fee is settled and the transaction aborts. The sponsorship note
  * carries the fee itself and is consumed together with the collect note, which
- * is how this SDK submits every other feature note. Sponsoring costs the caller
- * the protocol maximum and leaves the swept pot whole for the destination.
+ * is how this SDK submits every other feature note.
+ *
+ * The amount is the pool's own on-chain price for its collect note, read from
+ * the auth component's fee schedule, so the caller pays the schedule price and
+ * not the protocol maximum. `NOTE_FEES.collect` is the fallback when the
+ * schedule cannot be read.
  */
-function sponsorCollect(sender, target, featureNote, feeFaucetId) {
+function sponsorCollect(sender, target, featureNote, feeFaucetId, feeAmount) {
   return buildFeeSponsorshipNote({
     sender,
     target,
     featureNote,
     feeFaucetId,
-    feeAmount: MAX_TX_FEE,
+    feeAmount,
   });
+}
+
+/** Fee-schedule slot of the network auth component's constant-fee policy. */
+const FEE_SCHEDULE_SLOT =
+  "miden::standards::fees::policies::basic_constant_fee::fee_schedule";
+
+/**
+ * An account's price for one of its collect notes, from its on-chain fee
+ * schedule. Falls back to the SDK's table price when the slot is absent or
+ * unreadable.
+ */
+function scheduleFee(account, kind) {
+  try {
+    const entries = account?.storage().getMapEntries(FEE_SCHEDULE_SLOT);
+    const root = noteScript(kind).root().toHex().replace(/^0x/, "").toLowerCase();
+    const entry = entries?.find(
+      (item) => String(item.key).replace(/^0x/, "").toLowerCase() === root,
+    );
+    if (entry) {
+      const amount = BigInt(Word.fromHex(entry.value).toU64s()[0]);
+      if (amount > 0n) return amount;
+    }
+  } catch {
+    // Fall through to the table price.
+  }
+  return NOTE_FEES[kind];
 }
 
 /**
@@ -480,31 +535,60 @@ async function sweepRegistry(client, caller, registryId, feeFaucetId, submit) {
         .map((asset) => fungibleAssetIdWord(asset.faucetId()))
     : [];
   const before = registry ? registry.vault().getBalance(feeFaucetId) : 0n;
+  const registryFeeMeta = await readFaucetMeta(client, feeFaucetId);
   console.log(
-    `registry ${registryId.toString()} holds ${money(before, await readFaucetMeta(client, feeFaucetId))}`,
+    `registry ${registryId.toString()} holds ${money(before, registryFeeMeta)}`,
+  );
+  // The registry's collect reserves its own measured fee out of the fee asset.
+  console.log(
+    `  less the ${REGISTRY_COLLECT_FEE_HOLD} base unit hold = ${money(before > REGISTRY_COLLECT_FEE_HOLD ? before - REGISTRY_COLLECT_FEE_HOLD : 0n, registryFeeMeta)} paid out`,
   );
   if (assetKeys.length === 0) {
     console.log("nothing to sweep: the registry vault is empty.");
     return;
   }
 
-  const note = buildRegistryCollectNote({
-    sender: caller.id(),
-    registryId,
-    assetKeys,
-  });
-  const sponsor = sponsorCollect(caller.id(), registryId, note, feeFaucetId);
-  const request = await outputNotesRequest(client, [note, sponsor], registryId);
+  // The collect note script caps its key count, so a vault with more assets than
+  // that is swept in batches, one transaction each.
+  const batches = chunk(assetKeys, Number(COLLECT_MAX_KEYS));
+  if (batches.length > 1) {
+    console.log(
+      `${assetKeys.length} vault assets: sweeping in ${batches.length} batches of at most ${MAX_COLLECT_KEYS}`,
+    );
+  }
+  const requests = [];
+  for (const batch of batches) {
+    const note = buildRegistryCollectNote({
+      sender: caller.id(),
+      registryId,
+      assetKeys: batch,
+    });
+    const sponsor = sponsorCollect(
+      caller.id(),
+      registryId,
+      note,
+      feeFaucetId,
+      scheduleFee(registry, "registry-collect"),
+    );
+    requests.push({
+      notes: [note, sponsor],
+      request: await outputNotesRequest(client, [note, sponsor], registryId),
+    });
+  }
 
   if (!submit) {
-    console.log("dry run: the note is built and nothing is submitted. Pass --submit to sweep.");
+    console.log("dry run: the notes are built and nothing is submitted. Pass --submit to sweep.");
     return;
   }
 
   const paidBefore = await callerHeld(client, caller.id(), feeFaucetId);
-  const { txId } = await client.transactions.submit(caller.id(), request);
-  console.log(`submitted ${txId.toHex()}; waiting for confirmation`);
-  await client.transactions.waitFor(txId);
+  for (const [index, batch] of requests.entries()) {
+    const { txId } = await client.transactions.submit(caller.id(), batch.request);
+    console.log(
+      `batch ${index + 1}/${requests.length}: submitted ${txId.toHex()}; waiting for confirmation`,
+    );
+    await client.transactions.waitFor(txId);
+  }
   const paidAfter = await callerHeld(client, caller.id(), feeFaucetId);
   console.log(
     `caller paid ${money(paidBefore - paidAfter, await readFaucetMeta(client, feeFaucetId))} of its own fee asset`,
@@ -522,7 +606,9 @@ async function sweepRegistry(client, caller, registryId, feeFaucetId, submit) {
       `the network builder did not consume the note within ${PAYOUT_WAIT_SECS}s; ` +
         `acting directly`,
     );
-    await payOutDirectly(client, registryId, [note, sponsor], "registry");
+    for (const batch of requests) {
+      await payOutDirectly(client, registryId, batch.notes, "registry");
+    }
     const paid = await registryHeld(client, registryId, feeFaucetId);
     const paidMeta = await readFaucetMeta(client, feeFaucetId);
     console.log(
@@ -546,8 +632,25 @@ async function sweepPool(client, caller, poolId, feeFaucetId, submit) {
   console.log(
     `pool ${poolId.toString()} holds ${money(pot.amount0, meta0)} and ${money(pot.amount1, meta1)} in its protocol pot`,
   );
+  // The payout is `vault - reserves - hold`, per asset, never the pot alone: the
+  // vault can carry credits the accounting never recorded (sponsorship
+  // remainders), and the fee-asset payout reserves the transaction fee the
+  // contracts hold as `POOL_COLLECT_FEE_HOLD` and `REGISTRY_COLLECT_FEE_HOLD`.
+  for (const [index, meta] of [meta0, meta1].entries()) {
+    const faucetId = index === 0 ? state.token0FaucetId : state.token1FaucetId;
+    const reserved = index === 0 ? state.reserve0 : state.reserve1;
+    const vault = account.vault().getBalance(faucetId);
+    const hold = faucetId.toString() === feeFaucetId.toString() ? POOL_COLLECT_FEE_HOLD : 0n;
+    const payout = vault > reserved + hold ? vault - reserved - hold : 0n;
+    console.log(
+      `  ${meta?.symbol ?? faucetId.toString()}: vault ${vault} - reserves ${reserved}` +
+        `${hold > 0n ? ` - hold ${hold} (fee asset)` : ""} = payout ${payout}`,
+    );
+  }
   if (pot.amount0 === 0n && pot.amount1 === 0n) {
-    console.log("nothing to sweep: the pool's protocol pot is empty.");
+    console.log(
+      "the protocol pot is empty; any payout below is a vault credit outside the reserves",
+    );
   }
 
   // Sweep every fungible asset the vault holds: token0/token1 for the pot and
@@ -558,19 +661,39 @@ async function sweepPool(client, caller, poolId, feeFaucetId, submit) {
     console.log("nothing to sweep: the pool vault is empty.");
     return;
   }
-  const note = buildCollectNote({ sender: caller.id(), poolId, assetKeys });
-  const sponsor = sponsorCollect(caller.id(), poolId, note, feeFaucetId);
-  const request = await outputNotesRequest(client, [note, sponsor], poolId);
+  // The collect note script caps its key count, so a vault with more assets than
+  // that is swept in batches, one transaction each.
+  const batches = chunk(assetKeys, Number(COLLECT_MAX_KEYS));
+  if (batches.length > 1) {
+    console.log(
+      `${assetKeys.length} vault assets: sweeping in ${batches.length} batches of at most ${MAX_COLLECT_KEYS}`,
+    );
+  }
+  const collectFee = scheduleFee(account, "collect");
+  const requests = [];
+  for (const batch of batches) {
+    const note = buildCollectNote({ sender: caller.id(), poolId, assetKeys: batch });
+    const sponsor = sponsorCollect(caller.id(), poolId, note, feeFaucetId, collectFee);
+    requests.push({
+      notes: [note, sponsor],
+      request: await outputNotesRequest(client, [note, sponsor], poolId),
+    });
+  }
+  console.log(`sponsorship: ${collectFee} base units per batch (the pool's schedule price)`);
 
   if (!submit) {
-    console.log("dry run: the note is built and nothing is submitted. Pass --submit to sweep.");
+    console.log("dry run: the notes are built and nothing is submitted. Pass --submit to sweep.");
     return;
   }
 
   const paidBefore = await callerHeld(client, caller.id(), feeFaucetId);
-  const { txId } = await client.transactions.submit(caller.id(), request);
-  console.log(`submitted ${txId.toHex()}; waiting for confirmation`);
-  await client.transactions.waitFor(txId);
+  for (const [index, batch] of requests.entries()) {
+    const { txId } = await client.transactions.submit(caller.id(), batch.request);
+    console.log(
+      `batch ${index + 1}/${requests.length}: submitted ${txId.toHex()}; waiting for confirmation`,
+    );
+    await client.transactions.waitFor(txId);
+  }
   const paidAfter = await callerHeld(client, caller.id(), feeFaucetId);
   console.log(`caller paid ${paidBefore - paidAfter} base units of its own fee asset`);
   console.log("emitted notes:");
@@ -595,7 +718,9 @@ async function sweepPool(client, caller, poolId, feeFaucetId, submit) {
       `the network builder did not consume the note within ${PAYOUT_WAIT_SECS}s; ` +
         `acting directly`,
     );
-    await payOutDirectly(client, poolId, [note, sponsor], "pool");
+    for (const batch of requests) {
+      await payOutDirectly(client, poolId, batch.notes, "pool");
+    }
     const potNow = await readPot();
     console.log(
       `pool pot now holds ${money(potNow.amount0, meta0)} and ${money(potNow.amount1, meta1)}`,

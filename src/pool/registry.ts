@@ -28,8 +28,9 @@ import {
 } from "@miden-sdk/miden-sdk";
 import { contractPackageBytes } from "../artifacts.js";
 import { XykError } from "../errors.js";
+import type { PoolAuthRoots } from "./create.js";
 import { randomSeed, type Word4 } from "../math/encoding.js";
-import { MAX_TX_FEE, REGISTRY_SLOTS } from "../constants.js";
+import { REGISTRY_SLOTS, NOTE_FEES } from "../constants.js";
 import { noteScript } from "../notes/scripts.js";
 import { word4FromWord, wordFromWord4 } from "../notes/word.js";
 import { wasmModule } from "../wasm.js";
@@ -220,8 +221,57 @@ export interface CreateRegistryAccountParams {
   allowedLpFeeBps: readonly bigint[];
   /** Script root of the note that pays register fees out. */
   p2idRoot: Word4;
+  /**
+   * Account allowed to change the register fee. The registry compares it
+   * against the sender of a registry-config note.
+   */
+  admin: AccountId | string;
+  /**
+   * Auth roots every pool must carry, from `poolAuthRoots`. Registration
+   * compares the pool's own roots against these, so a pool with an allowlist of
+   * its own cannot be listed.
+   */
+  authRoots: PoolAuthRoots;
   /** 32-byte account seed; defaults to a fresh random seed. */
   seed?: Uint8Array;
+}
+
+/** The auth component's constant-fee schedule slot. */
+const FEE_SCHEDULE_SLOT =
+  "miden::standards::fees::policies::basic_constant_fee::fee_schedule";
+
+/**
+ * Reads the registry's live register fee, in the fee asset's base units.
+ *
+ * The fee is an entry in the registry's own fee schedule, so after the admin
+ * changes it this is the authoritative price; the SDK's `NOTE_FEES.register` is
+ * only the value a fresh registry starts with.
+ */
+export async function readRegistryRegisterFee(
+  getAccount: (id: AccountId) => Promise<Account | null>,
+  registryId: AccountId,
+): Promise<bigint> {
+  const { Word } = wasmModule();
+  const account = await getAccount(registryId);
+  if (!account) {
+    throw new XykError(
+      "POOL_NOT_FOUND",
+      `registry account ${registryId.toString()} not found`,
+    );
+  }
+  const storage = registryStorage(account);
+  const entries = storage.getMapEntries(FEE_SCHEDULE_SLOT);
+  const root = noteScript("register").root().toHex().replace(/^0x/, "").toLowerCase();
+  const entry = entries?.find(
+    (item) => String(item.key).replace(/^0x/, "").toLowerCase() === root,
+  );
+  if (!entry) {
+    throw new XykError(
+      "MISSING_SLOT",
+      `the registry prices no register note; nothing can be registered`,
+    );
+  }
+  return BigInt(Word.fromHex(entry.value).toU64s()[0] ?? 0n);
 }
 
 /**
@@ -251,6 +301,7 @@ export async function createRegistryAccount(
   }
 
   const protocolFeeTo = parseAccountId(params.protocolFeeTo);
+  const admin = parseAccountId(params.admin);
   const slots = new StorageSlotArray([
     StorageSlot.map(REGISTRY_SLOTS.acceptedCodeCommitments, accepted),
     StorageSlot.map(REGISTRY_SLOTS.pools, new StorageMap()),
@@ -266,6 +317,40 @@ export async function createRegistryAccount(
       wordFromWord4([params.protocolFeeShareBps, 0n, 0n, 0n]),
     ),
     StorageSlot.fromValue(REGISTRY_SLOTS.p2idRoot, wordFromWord4(params.p2idRoot)),
+    StorageSlot.fromValue(
+      REGISTRY_SLOTS.expectedNoteAllowlistRoot,
+      wordFromWord4(params.authRoots.noteAllowlistRoot),
+    ),
+    StorageSlot.fromValue(
+      REGISTRY_SLOTS.expectedTxScriptAllowlistRoot,
+      wordFromWord4(params.authRoots.txScriptAllowlistRoot),
+    ),
+    StorageSlot.fromValue(
+      REGISTRY_SLOTS.expectedFeeScheduleRoot,
+      wordFromWord4(params.authRoots.feeScheduleRoot),
+    ),
+    StorageSlot.fromValue(
+      REGISTRY_SLOTS.expectedFeeAssetId,
+      wordFromWord4(params.authRoots.feeAssetId),
+    ),
+    StorageSlot.fromValue(
+      REGISTRY_SLOTS.expectedActiveFeePolicyRoot,
+      wordFromWord4(params.authRoots.activeFeePolicyRoot),
+    ),
+    StorageSlot.fromValue(
+      REGISTRY_SLOTS.expectedAllowedFeePolicyRoots,
+      wordFromWord4(params.authRoots.allowedFeePolicyRoots),
+    ),
+    // The only script root whose fee the admin's setter may change.
+    StorageSlot.fromValue(
+      REGISTRY_SLOTS.registerNoteRoot,
+      wordFromWord4(Array.from(noteScript("register").root().toU64s()).map((limb) => BigInt(limb)) as unknown as Word4),
+    ),
+    // admin word: [0, 0, suffix, prefix]
+    StorageSlot.fromValue(
+      REGISTRY_SLOTS.admin,
+      wordFromWord4([0n, 0n, admin.suffix().asInt(), admin.prefix().asInt()]),
+    ),
   ]);
 
   const registryPackage = Package.deserialize(contractPackageBytes("registry"));
@@ -276,14 +361,15 @@ export async function createRegistryAccount(
 
   // Every admitted script root must carry a fee: a root that the fee policy does
   // not price aborts fee estimation for that note, so the registry could never
-  // consume it. Both are priced at the protocol maximum, so the prepaid
-  // sponsorship always covers the actual transaction fee; the registry keeps the
-  // difference and a later collect sweeps it.
-  const registerFee =
-    params.registerFee > MAX_TX_FEE ? params.registerFee : MAX_TX_FEE;
+  // consume it. The prices are the measured schedule, so the prepaid sponsorship
+  // covers the actual transaction fee with the pricer's one-cycle margin.
+  const registerFee = params.registerFee > 0n ? params.registerFee : NOTE_FEES.register;
+  // The config note is priced at zero: the registry pays its own fee from the
+  // balance it has accumulated, and the admin pays nothing to change the price.
   const feeEntries = [
     new NoteScriptFee(noteScript("register").root(), registerFee),
-    new NoteScriptFee(noteScript("registry-collect").root(), MAX_TX_FEE),
+    new NoteScriptFee(noteScript("registry-collect").root(), NOTE_FEES["registry-collect"]),
+    new NoteScriptFee(noteScript("registry-config").root(), 0n),
   ];
   const authComponents = AccountComponent.createNetworkAuthComponents(
     feeEntries,

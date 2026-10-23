@@ -20,7 +20,7 @@
  *   PORT0_FEE_FAUCET_ID   required, chain fee faucet
  *   PORT0_POOL_COMMITMENT required, from `npm run pool:commitment`
  *   MIDEN_RPC_URL             default https://rpc.testnet.miden.io
- *   PORT0_REGISTER_FEE    default 0, register note fee in base units
+ *   PORT0_REGISTER_FEE    default 119, register note fee in base units
  *   PORT0_FUND            default 1000, base units sent to the registry
  *   PORT0_STORE           default port0-registry
  *   PORT0_OPERATOR        optional, existing operator account id
@@ -43,6 +43,7 @@ import {
   deployRegistryAccount,
   noteScript,
   p2idRoot,
+  poolAuthRoots,
   readRegistryAcceptedCodeCommitments,
   wasmModule,
 } from "../dist/index.js";
@@ -66,7 +67,7 @@ async function main() {
   const feeFaucetId = required("PORT0_FEE_FAUCET_ID");
   const poolCommitment = required("PORT0_POOL_COMMITMENT");
   const rpcUrl = process.env.MIDEN_RPC_URL ?? "https://rpc.testnet.miden.io";
-  const registerFee = BigInt(process.env.PORT0_REGISTER_FEE ?? "133");
+  const registerFee = BigInt(process.env.PORT0_REGISTER_FEE ?? "119");
   const protocolFeeTo = required("PORT0_PROTOCOL_FEE_TO");
   const protocolFeeShareBps = BigInt(process.env.PORT0_PROTOCOL_FEE_SHARE_BPS ?? "1200");
   const allowedLpFeeBps = (process.env.PORT0_LP_FEE_TIERS ?? "5,30,100")
@@ -96,6 +97,9 @@ async function main() {
   const accounts = await allAccounts(client);
   const operator = await resolveOperator(client, accounts);
   const registry = await resolveRegistry(client, accounts, operator, {
+    // The account allowed to change the register fee. Defaults to the operator,
+    // which is the account that signs for the registry's own upkeep.
+    admin: process.env.PORT0_REGISTRY_ADMIN ?? operator.id().toString(),
     poolCommitment,
     feeFaucetId,
     registerFee,
@@ -264,7 +268,18 @@ async function resolveRegistry(client, accounts, operator, config) {
       (id) => client.accounts.get(id),
       candidate.id(),
     );
-    if (accepts(accepted)) return candidate;
+    // A registry prices and allowlists the note roots of the build it was
+    // created from. A note that links this interface embeds those roots, so a
+    // registry created before an interface change would never consume the
+    // current register note; it must not be reused.
+    if (accepts(accepted) && pricesCurrentNotes(candidate)) return candidate;
+    if (accepts(accepted)) {
+      console.log(
+        `stored registry ${candidate.id().toString()} does not price this build's notes; ` +
+          "deploying a new registry",
+      );
+      continue;
+    }
     console.log(
       `stored registry ${candidate.id().toString()} does not accept this pool code ` +
         `(${accepted.length} accepted, none equal to ${config.poolCommitment}); ` +
@@ -272,15 +287,51 @@ async function resolveRegistry(client, accounts, operator, config) {
     );
   }
 
+  // The auth roots every pool must carry, read from a reference pool build:
+  // the registry compares them on every registration, so a pool with an
+  // allowlist of its own cannot be listed.
+  const authRoots = await poolAuthRoots(client, {
+    token0Key: [1n, 2n, 3n, 4n],
+    token1Key: [5n, 6n, 7n, 8n],
+    token0Symbol: "ALPHA",
+    token1Symbol: "BETA",
+    // Any account id satisfies the builder here; storage does not affect the
+    // code commitment or the auth roots this reads.
+    registryId: AccountId.fromHex(config.feeFaucetId),
+    lpFeeBps: 30n,
+    protocolFeeShareBps: config.protocolFeeShareBps,
+    feeFaucetId: config.feeFaucetId,
+  });
   return createRegistryAccount(client, {
     acceptedPoolCodeCommitment: config.poolCommitment,
+    admin: config.admin,
     feeFaucetId: config.feeFaucetId,
     registerFee: config.registerFee,
     protocolFeeTo: config.protocolFeeTo,
     protocolFeeShareBps: config.protocolFeeShareBps,
     allowedLpFeeBps: config.allowedLpFeeBps,
     p2idRoot: config.registryP2idRoot,
+    authRoots,
   });
+}
+
+/**
+ * True when the registry's fee schedule and allowlist name this build's register
+ * note script root, so the register note this tooling emits can be consumed.
+ */
+function pricesCurrentNotes(registry) {
+  const scheduleSlot =
+    "miden::standards::fees::policies::basic_constant_fee::fee_schedule";
+  const allowlistSlot =
+    "miden::standards::auth::network_account::allowed_note_scripts";
+  const want = noteScript("register").root().toHex().replace(/^0x/, "").toLowerCase();
+  const names = (slot) =>
+    new Set(
+      (registry.storage().getMapEntries(slot) ?? []).map((entry) =>
+        String(entry.key).replace(/^0x/, "").toLowerCase(),
+      ),
+    );
+  return names(scheduleSlot).has(want) && names(allowlistSlot).has(want);
 }
 
 /**

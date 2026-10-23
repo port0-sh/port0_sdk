@@ -40,13 +40,18 @@ const CONTRACTS = [
   { key: "registry", dir: "pool-registry", artifact: "pool-registry.masp" },
   { key: "register", dir: "register-note", artifact: "register_note.masp" },
   {
+    key: "registry-config",
+    dir: "registry-config-note",
+    artifact: "registry_config_note.masp",
+  },
+  {
     key: "registry-collect",
     dir: "registry-collect-note",
     artifact: "registry_collect_note.masp",
   },
 ];
 
-const build = process.argv.includes("--build");
+const build = !process.argv.includes("--no-build");
 
 if (build) {
   for (const { dir } of CONTRACTS) {
@@ -97,7 +102,8 @@ export type ContractKind =
   | "swap"
   | "collect"
   | "register"
-  | "registry-collect";
+  | "registry-collect"
+  | "registry-config";
 
 /**
  * Base64-encoded compiled Miden packages (.masp) for each contract.
@@ -123,3 +129,34 @@ export const GENERATED_AT: string = ${JSON.stringify(new Date().toISOString())};
 const outPath = join(outDir, "contracts.ts");
 writeFileSync(outPath, output);
 console.log(`Wrote ${outPath}`);
+
+// The collect fee holds the contracts enforce, parsed from the one file both
+// contracts include. The tooling prints these, so a hand-copied number cannot
+// drift from what the contracts reserve.
+const holdSource = readFileSync(join(contractsRoot, "collect-fee-hold.rs"), "utf8");
+const holdOf = (name) => {
+  const match = holdSource.match(
+    new RegExp(`const ${name}: \\w+ = (\\d+);`),
+  );
+  if (!match) {
+    throw new Error(`collect-fee-hold.rs declares no ${name}`);
+  }
+  return BigInt(match[1]);
+};
+const feesPath = join(outDir, "fees.ts");
+writeFileSync(
+  feesPath,
+  `/**
+ * Fee-asset reserve a collect leaves for the transaction's own epilogue charge.
+ *
+ * Generated from \`port0_contracts/contracts/collect-fee-hold.rs\`, the file both
+ * contracts include, so the tooling prints exactly what the contracts reserve.
+ * Regenerate with \`npm run generate\`; do not edit.
+ */
+export const POOL_COLLECT_FEE_HOLD: bigint = ${holdOf("POOL_COLLECT_FEE_HOLD")}n;
+export const REGISTRY_COLLECT_FEE_HOLD: bigint = ${holdOf("REGISTRY_COLLECT_FEE_HOLD")}n;
+/** Asset keys one collect note may carry; the scripts and the tooling share it. */
+export const COLLECT_MAX_KEYS: bigint = ${holdOf("COLLECT_MAX_KEYS")}n;
+`,
+);
+console.log(`Wrote ${feesPath}`);

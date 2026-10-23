@@ -12,7 +12,7 @@ import { contractPackageBytes } from "../artifacts.js";
 export type PoolNoteKind = "mint" | "burn" | "swap" | "collect";
 
 /** Every note script the SDK ships. */
-export type NoteKind = PoolNoteKind | "register" | "registry-collect";
+export type NoteKind = PoolNoteKind | "register" | "registry-collect" | "registry-config";
 
 /** The notes a pool allowlists, in a stable order. */
 export const POOL_NOTE_KINDS: readonly PoolNoteKind[] = [
@@ -27,6 +27,7 @@ export const NOTE_KINDS: readonly NoteKind[] = [
   ...POOL_NOTE_KINDS,
   "register",
   "registry-collect",
+  "registry-config",
 ] as const;
 
 const cache = new Map<NoteKind, NoteScript>();

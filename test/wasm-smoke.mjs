@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import {
   AccountComponent,
+  BasicFungibleFaucetComponent,
   FaucetType,
   MidenClient,
   NoteScript,
@@ -30,6 +31,7 @@ import {
   noteScript,
   NOTE_KINDS,
   ownOutputNotesRequest,
+  poolAuthRoots,
   poolCodeCommitment,
   poolInitSlots,
   readRegistryAcceptedCodeCommitments,
@@ -214,6 +216,8 @@ assert.deepEqual(
 const poolParams = {
   token0Key: fungibleAssetIdWord(token0),
   token1Key: fungibleAssetIdWord(token1),
+  token0Symbol: "ALPHA",
+  token1Symbol: "BETA",
   registryId: sender,
   lpFeeBps: 30n,
   protocolFeeShareBps: 10n,
@@ -230,8 +234,30 @@ assert.equal(
 );
 console.log("pool code commitment:", commitment);
 
+// The pool account is its own LP faucet and carries the standard faucet
+// component, so a wallet can read the LP token's name, symbol, and decimals
+// instead of showing "Unknown".
+assert.equal(poolAccount.isFaucet(), true, "pool account must be a faucet");
+const lpMeta = BasicFungibleFaucetComponent.fromAccount(poolAccount);
+assert.equal(lpMeta.symbol().toString(), "POALPHABETA", "LP symbol");
+assert.equal(lpMeta.decimals(), 0, "LP decimals");
+assert.equal(
+  lpMeta.maxSupply().toString(),
+  (2n ** 63n - 2n ** 31n).toString(),
+  "LP max supply",
+);
+
 // Registry account builds as a network account with the accepted pool code
 // commitment seeded and the register note allowlisted.
+// The auth roots the registry requires of every pool, read from a reference
+// pool build. Without them registration rejects every pool (fail closed).
+const authRoots = await poolAuthRoots(client, poolParams);
+for (const [name, root] of Object.entries(authRoots)) {
+  assert.ok(
+    root.some((limb) => limb !== 0n),
+    `pool auth root ${name} must not be zero`,
+  );
+}
 const registryAccount = await createRegistryAccount(client, {
   acceptedPoolCodeCommitment: commitment,
   feeFaucetId: feeFaucet,
@@ -240,6 +266,9 @@ const registryAccount = await createRegistryAccount(client, {
   protocolFeeShareBps: 10n,
   allowedLpFeeBps: [5n, 30n, 100n],
   p2idRoot: [9n, 10n, 11n, 12n],
+  authRoots,
+  // The account allowed to change the register fee.
+  admin: sender,
 });
 assert.equal(registryAccount.isNetworkAccount(), true);
 

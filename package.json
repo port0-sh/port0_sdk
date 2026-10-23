@@ -1,6 +1,6 @@
 {
   "name": "@port0.sh/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TypeScript SDK for the port0.sh constant-product AMM. Builds XYK network notes, fee sponsorships, quotes, pool reads, and pool operations on top of @miden-sdk/miden-sdk.",
   "type": "module",
   "license": "MIT",
@@ -49,7 +49,7 @@
   ],
   "scripts": {
     "generate": "node scripts/export-contracts.mjs",
-    "generate:build": "node scripts/export-contracts.mjs --build",
+    "generate:export-only": "node scripts/export-contracts.mjs --no-build",
     "build": "tsup",
     "test": "vitest run",
     "test:wasm": "npm run build && node test/wasm-smoke.mjs",
@@ -57,8 +57,9 @@
     "registry:deploy": "npm run build && node scripts/deploy-registry.mjs",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run typecheck && npm test && npm run build",
-    "fees:collect": "npm run build && node scripts/collect-fees.mjs"
+    "prepublishOnly": "npm run generate && npm run typecheck && npm test && npm run build",
+    "fees:collect": "npm run build && node scripts/collect-fees.mjs",
+    "registry:set-fee": "npm run build && node scripts/set-register-fee.mjs"
   },
   "peerDependencies": {
     "@miden-sdk/miden-sdk": "0.17.1"

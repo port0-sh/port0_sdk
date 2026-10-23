@@ -1,4 +1,5 @@
 export * from "./constants.js";
+export * from "./generated/fees.js";
 export * from "./wasm.js";
 export { contractPackageBytes, CONTRACT_KINDS } from "./artifacts.js";
 export * from "./math/quotes.js";
@@ -14,6 +15,7 @@ export * from "./pool/decoding.js";
 export * from "./pool/reads.js";
 export * from "./pool/slots.js";
 export * from "./pool/create.js";
+export * from "./pool/lpFaucet.js";
 export * from "./pool/registry.js";
 export * from "./pool/config.js";
 export * from "./ops/helpers.js";

@@ -241,6 +241,44 @@ export function buildRegistryCollectNote(input: RegistryCollectNoteInput): Note 
   });
 }
 
+export interface RegistryConfigNoteInput {
+  /** Account executing the transaction that emits the config note: the admin. */
+  sender: AccountId;
+  /** Registry (network account) the note targets. */
+  registryId: AccountId;
+  /** New register fee, in the fee asset's base units. */
+  registerFee: bigint;
+}
+
+/**
+ * Builds the note that sets the registry's register fee.
+ *
+ * The registry checks the note's sender against the admin it was created with,
+ * so a config note from anybody else is rejected. The fee is what registration
+ * costs, so changing it is the only lever against a flood of pools. The note
+ * carries the register note's script root, which the registry requires to be
+ * already scheduled: the root moves whenever the registry's interface changes,
+ * so it cannot be a constant in the registry.
+ */
+export function buildRegistryConfigNote(input: RegistryConfigNoteInput): Note {
+  const root = noteScript("register").root().toU64s();
+  return buildNetworkNote({
+    sender: input.sender,
+    target: input.registryId,
+    script: noteScript("registry-config"),
+    inputs: [
+      input.registryId.prefix().asInt(),
+      input.registryId.suffix().asInt(),
+      input.registerFee,
+      BigInt(root[0] ?? 0n),
+      BigInt(root[1] ?? 0n),
+      BigInt(root[2] ?? 0n),
+      BigInt(root[3] ?? 0n),
+    ],
+    assets: [],
+  });
+}
+
 export interface RegisterNoteInput {
   /** Account executing the transaction that emits the register note. */
   sender: AccountId;

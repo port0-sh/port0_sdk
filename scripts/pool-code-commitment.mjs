@@ -50,6 +50,8 @@ const feeFaucet = (
 const commitment = await poolCodeCommitment(client, {
   token0Key: fungibleAssetIdWord(token0),
   token1Key: fungibleAssetIdWord(token1),
+  token0Symbol: "ALPHA",
+  token1Symbol: "BETA",
   registryId: registry,
   lpFeeBps: 30n,
   protocolFeeShareBps: 10n,

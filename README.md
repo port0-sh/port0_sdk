@@ -10,10 +10,12 @@ A pool is a public network account. The pool consumes four XYK notes (`mint`,
 `burn`, `swap`, `collect`). The registry consumes two: `register`, and
 `registry-collect`, which sweeps the registry's whole balance.
 Every network note travels with a FEE_SPONSORSHIP note. Every note kind is
-priced at the protocol maximum (210 base units at the current base fee), so the
-sponsorship always covers the actual transaction fee; the remainder stays with
-the account and a later collect sweeps it. The registry's `collect` also leaves
-the transaction's own fee in its vault.
+priced by the measured schedule (`NOTE_FEES`: 126 for `mint`, `burn`, `swap`,
+and `collect`; 119 for `register` and `registry-collect` at the current base
+fee), so the sponsorship covers the actual transaction fee with the pricer's
+one-verification-cycle margin; the remainder stays with the account and a later
+collect sweeps it. The registry's `collect` also leaves the transaction's own
+fee in its vault.
 
 ## Install
 
@@ -42,7 +44,7 @@ const xyk = XykClient.from(client);
 const pool = xyk.pool({
   poolId,
   feeFaucetId,
-  noteFees: { swap: 210n }, // protocol maximum; fixed at pool creation
+  noteFees: { swap: 126n }, // the measured schedule; fixed at pool creation
 });
 
 const state = await pool.state();
@@ -79,7 +81,8 @@ type SerialNumber = Word4;
 | `MAX_AMOUNT` | `1n << 57n` | Upper bound on every reserve, amount, and `lp_supply`. |
 | `MINIMUM_LIQUIDITY` | `1000n` | LP tokens locked permanently on the first mint. |
 | `FEE_DENOMINATOR` | `10_000n` | Basis-point denominator for both fees. |
-| `MAX_TX_FEE` | `210n` | Protocol maximum transaction fee at the current base fee (`7 x 30`); the floor for every note sponsorship. |
+| `MAX_TX_FEE` | `210n` | Operator-solvency ceiling at the current base fee (`7 x 30`); scripts size funding with it, never a note price. |
+| `NOTE_FEES` | `{...}` | Measured schedule price per note kind, in fee-asset base units. |
 | `SLOT_PREFIX` | `"port0::port0"` | Storage slot name prefix shared by all pool slots. |
 | `REGISTRY_SLOT_PREFIX` | `"pool_registry::pool_registry"` | Storage slot name prefix shared by all registry slots. |
 
@@ -389,14 +392,40 @@ createFeeFaucet(client, params: FeeFaucetParams): Promise<Account>
 poolInitSlots(params): PoolInitSlotDefinition[]
 ```
 
-`CreatePoolAccountParams` is `{ token0Key: Word4, token1Key: Word4, registryId:
-AccountId, lpFeeBps: bigint, protocolFeeShareBps: bigint, p2idRoot?: Word4,
-feeFaucetId: AccountId, noteFees?: PoolNoteFees, seed?: Uint8Array }`.
+`CreatePoolAccountParams` is `{ token0Key: Word4, token1Key: Word4, token0Symbol:
+string, token1Symbol: string, registryId: AccountId, lpFeeBps: bigint,
+protocolFeeShareBps: bigint, p2idRoot?: Word4, feeFaucetId: AccountId,
+noteFees?: PoolNoteFees, seed?: Uint8Array }`. The two symbols name the LP token
+(see below); the account's own code commitment is what the registry accepts.
 `PoolNoteFees` is `Partial<Record<PoolNoteKind, bigint>>`. `createPoolAccount`
 builds the pool component from the compiled package and the ten init slots,
-installs the standard `CodeInspection` component, installs
+installs the standard fungible-faucet component so the LP token carries readable
+metadata (see below), installs the standard `CodeInspection` component, installs
 `AccountComponent.createNetworkAuthComponents` with the fee schedule, and
 inserts the account into the client's local store. It does not deploy.
+
+#### LP token metadata
+
+A pool account is its own LP faucet: the contract derives the LP asset id from
+the pool's account id, and the kernel lets an account mint assets whose faucet
+id is its own. Without the standard faucet component the account exposes no
+name, symbol, or decimals, and wallets render the LP token as "Unknown". The
+SDK therefore compiles the standard fungible-faucet component
+(`miden-standards` 0.17.1, namespace
+`miden::standards::components::faucets::fungible_faucet`) and installs it with
+the standards' storage layout:
+
+| Field | Value |
+| --- | --- |
+| Symbol | `PO` plus up to five A-Z letters of each side's symbol, e.g. `POUSDCXAAA` |
+| Name | `port0 LP <token0>/<token1>` |
+| Decimals | `0`, matching the app's raw-unit LP display |
+| Max supply | `AssetAmount::MAX` (`2^63 - 2^31`), the protocol maximum; the pool mints through the kernel, which bounds the amount but does not read the faucet config |
+| Mutability | none: the max supply cannot be changed later |
+
+`TokenSymbol` allows uppercase ASCII letters only, 1 to 12 characters, so a
+digit prefix such as `P0` is rejected by the protocol. The metadata is fixed
+when the account is built; changing it means a new pool.
 
 `CodeInspection` exposes `get_code_commitment`,
 which the registry calls over FPI to verify the pool code at registration. The
