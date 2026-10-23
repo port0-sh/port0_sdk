@@ -7,15 +7,17 @@ quotes, pool state decoding, pool and registry account creation, and
 transaction request assembly.
 
 A pool is a public network account. The pool consumes four XYK notes (`mint`,
-`burn`, `swap`, `collect`). The registry consumes two: `register`, and
-`registry-collect`, which sweeps the registry's whole balance.
+`burn`, `swap`, `collect`). The registry consumes three: `register`,
+`registry-collect`, which sweeps the registry's whole balance, and
+`registry-config`, which changes the register fee and is admin only. A network
+faucet consumes `launch`, which mints its whole supply once.
 Every network note travels with a FEE_SPONSORSHIP note. Every note kind is
 priced by the measured schedule (`NOTE_FEES`: 126 for `mint`, `burn`, `swap`,
-and `collect`; 119 for `register` and `registry-collect` at the current base
-fee), so the sponsorship covers the actual transaction fee with the pricer's
-one-verification-cycle margin; the remainder stays with the account and a later
-collect sweeps it. The registry's `collect` also leaves the transaction's own
-fee in its vault.
+and `collect`; 119 for `register`, `registry-collect`, and `launch` at the
+current base fee; zero for `registry-config`), so the sponsorship covers the
+actual transaction fee with the pricer's one-verification-cycle margin; the
+remainder stays with the account and a later collect sweeps it. The registry's
+`collect` also leaves the transaction's own fee in its vault.
 
 ## Install
 
@@ -228,12 +230,14 @@ buildSwapNote(input: SwapNoteInput): Note
 buildCollectNote(input: CollectNoteInput): Note
 buildRegisterNote(input: RegisterNoteInput): Note
 buildRegistryCollectNote(input: RegistryCollectNoteInput): Note
+buildRegistryConfigNote(input: RegistryConfigNoteInput): Note
+buildLaunchNote(input: LaunchNoteInput): Note
 buildFeeSponsorshipNote(input: FeeSponsorshipNoteInput): Note
 
 p2idRoot(): Word4
 noteScript(kind: NoteKind): NoteScript
 POOL_NOTE_KINDS: readonly PoolNoteKind[]  // ["mint","burn","swap","collect"]
-NOTE_KINDS: readonly NoteKind[]           // POOL_NOTE_KINDS plus "register", "registry-collect", "registry-config"
+NOTE_KINDS: readonly NoteKind[]           // POOL_NOTE_KINDS plus "register", "registry-collect", "registry-config", "launch"
 ```
 
 Common input fields: `sender`, `poolId`, `recipient` (where applicable),
@@ -255,6 +259,11 @@ cap a note at four asset keys.
 `buildRegistryConfigNote` takes `sender`, `registryId`, and `registerFee`. The
 note is accepted only from the registry admin, and only for the register note's
 schedule entry.
+
+`buildLaunchNote` takes `sender`, `faucetId`, `recipient`, and optional `serial`
+and `tag`. The note targets a network faucet and carries the 9-felt launch
+layout. The faucet accepts it only when `sender` is the faucet's owner and the
+supply has not been minted.
 
 A registry admits three note kinds, and `createRegistryAccount` prices all of
 them in the network auth it installs from `NOTE_FEES`: `register` at
@@ -364,6 +373,7 @@ readRegistryFeePolicy(getAccount, registryId): Promise<RegistryFeePolicy>
 readRegistryPoolForAssets(getAccount, registryId, asset0, asset1): Promise<AccountId | null>
 readRegistryAcceptedCodeCommitments(getAccount, registryId): Promise<Word4[]>
 readRegistryRegisterFee(getAccount, registryId): Promise<bigint>
+readRegistryAdmin(getAccount, registryId): Promise<AccountId>
 parseAccountId(value: AccountId | string): AccountId
 REGISTRY_SLOTS
 ```
@@ -475,11 +485,40 @@ client re-parses account references worker-side. `DeployOptions` forwards
 fungible faucet. It is not the pool's network note fee asset: a pool's
 `feeFaucetId` must be the chain fee faucet (`client.feeFaucetId()`, USDCX on
 the testnet) or the node never consumes the pool's notes. Use this helper
-only for application-level faucets, such as a launchpad token.
+only for an application faucet that needs ongoing minting. A fixed-supply token
+that mints once is a network faucet.
 
 `poolInitSlots({ token0Key, token1Key, registryId, lpFeeBps,
-protocolFeeShareBps, p2idRoot })` returns the ten `PoolInitSlotDefinition`
+protocolFeeShareBps, p2idRoot })` returns the eleven `PoolInitSlotDefinition`
 entries used at account creation.
+
+## Network faucet (`pool/networkFaucet.ts`, `pool/lpFaucet.ts`)
+
+```ts
+buildNetworkFaucet(client, params: CreateNetworkFaucetParams): Promise<Account>
+createNetworkFaucet(client, params: CreateNetworkFaucetParams): Promise<Account>
+deployNetworkFaucet(client, faucetId, fundingNoteId, options?): Promise<TransactionSubmitResult>
+LAUNCH_FEE: bigint
+
+standardFaucetComponent(client, params): Promise<AccountComponent>
+fungibleFaucetSlots(params): PoolInitSlotDefinition[]
+```
+
+A network faucet is a fixed-supply token whose faucet is a network account, so
+it needs no allowlist entry on a gated network. `CreateNetworkFaucetParams` is
+`{ name, symbol, decimals, maxSupply, owner, feeFaucetId, seed? }`. The account
+carries the `network-faucet` component (owner and launch flag), the standard
+basic fungible faucet component (name, symbol, decimals, maximum supply), and the
+network auth that allowlists the launch note at `LAUNCH_FEE`.
+
+`buildNetworkFaucet` builds without inserting; `createNetworkFaucet` inserts it
+into the client store; `deployNetworkFaucet` consumes a funding note as the
+account's first transaction. The supply is minted later, by a launch note from
+the owner.
+
+`standardFaucetComponent` and `fungibleFaucetSlots` expose the standards' faucet
+component and its storage layout for arbitrary metadata; the pool's LP token uses
+the same pair with its own symbol, name, decimals, and maximum supply.
 
 ## Pool config (`pool/config.ts`)
 
@@ -598,7 +637,8 @@ wasmModule(): typeof import("@miden-sdk/miden-sdk")
 ```
 
 `ContractKind` is `"pool" | "registry" | "mint" | "burn" | "swap" | "collect" |
-"registry-collect" | "register" | "registry-config"`. `wasmModule()` returns the full web-sdk module
+"registry-collect" | "register" | "registry-config" | "network-faucet" |
+"launch"`. `wasmModule()` returns the full web-sdk module
 on both browser and Node; the Node entry does not re-export the array wrappers
 as named exports, and this accessor hides that difference.
 
@@ -651,13 +691,25 @@ npm run fees:collect      # builds, then sweeps pool or registry fees
 ```
 
 `registry:deploy` uses the Node client with its filesystem store under
-`~/.miden/stores/<PORT0_STORE>/`. It is interactive: when the operator
-wallet is missing or underfunded it prints the address and polls until the
-chain fee asset arrives, then builds the registry through
-`createRegistryAccount`, funds it, and consumes the funding note. A stored
-registry is reused only when it accepts the configured pool code commitment and
-admits all three registry note kinds; otherwise a fresh registry is deployed. No
-re-run is needed. See the script header for the environment variables.
+`~/.miden/stores/<PORT0_STORE>/`. Every value that becomes registry policy or
+identifies an account is required and has no default: the fee faucet, the pool
+commitment, the operator, the admin, the register fee, the protocol recipient,
+the protocol share, the LP tiers, the store, the RPC URL, the prover, and the
+note transport. It prints all of them with the account ids in hex and bech32 and
+waits for the deployer to type `deploy`; `--yes` skips the prompt for an
+unattended run.
+
+The admin is the only account that can ever change the register fee, and it
+cannot be rotated. It is compared as an id only, so it may be a wallet account
+whose key never enters the store. The operator is the throwaway keyed account
+that funds the deployment.
+
+When the operator is underfunded the script prints the address and polls until
+the chain fee asset arrives, then funds the registry and consumes the funding
+note. A stored registry is reused only when it accepts the configured pool code
+commitment and admits all three registry note kinds; otherwise a fresh registry
+is deployed. No re-run is needed. See the script header for the environment
+variables.
 
 `fees:collect` sweeps protocol fees:
 
