@@ -1,23 +1,12 @@
 # port0.sh SDK
 
-TypeScript SDK for the port0.sh constant-product AMM. It wraps
-`@miden-sdk/miden-sdk` and owns every Miden-specific step: compiled contract
-packages, note script loading, note storage layouts, fee sponsorship notes,
-quotes, pool state decoding, pool and registry account creation, and
-transaction request assembly.
+TypeScript SDK for the port0.sh constant-product AMM on Miden. It builds the
+network notes, fee sponsorships, quotes, and transaction requests that pools and
+the pool registry execute, and reads their on-chain state.
 
-A pool is a public network account. The pool consumes four XYK notes (`mint`,
-`burn`, `swap`, `collect`). The registry consumes three: `register`,
-`registry-collect`, which sweeps the registry's whole balance, and
-`registry-config`, which changes the register fee and is admin only. A network
-faucet consumes `launch`, which mints its whole supply once.
-Every network note travels with a FEE_SPONSORSHIP note. Every note kind is
-priced by the measured schedule (`NOTE_FEES`: 126 for `mint`, `burn`, `swap`,
-and `collect`; 119 for `register`, `registry-collect`, and `launch` at the
-current base fee; zero for `registry-config`), so the sponsorship covers the
-actual transaction fee with the pricer's one-verification-cycle margin; the
-remainder stays with the account and a later collect sweeps it. The registry's
-`collect` also leaves the transaction's own fee in its vault.
+Every amount is `bigint` in base units. The math is a direct port of the contracts
+in [`port0_contracts`](https://github.com/port0-sh/port0_contracts), with the same
+rounding and the same failure conditions.
 
 ## Install
 
@@ -25,735 +14,301 @@ remainder stays with the account and a later collect sweeps it. The registry's
 npm install @port0.sh/sdk @miden-sdk/miden-sdk
 ```
 
-The SDK peers on `@miden-sdk/miden-sdk`. Pin the version the testnet runs; see
-https://status.testnet.miden.io/.
+The SDK peers on `@miden-sdk/miden-sdk@^0.17.6`, the version its `dist` is built
+and tested against. A client talks only to a node of the same major.minor.
 
 ## Quick start
 
 ```ts
-import { MidenClient } from "@miden-sdk/miden-sdk";
-import { XykClient, deadlineFrom } from "@port0.sh/sdk";
+import { MidenClient } from '@miden-sdk/miden-sdk'
+import { XykClient, fetchPoolState, NOTE_FEES } from '@port0.sh/sdk'
 
-const client = await MidenClient.create({
-  rpcUrl: "https://rpc.testnet.miden.io/",
-  feeFaucetId: "0x4cbdcaffe75f0a317482224dae6436", // chain fee faucet, required
-  proverUrl: "testnet",
-  autoSync: false,
-});
-await client.syncChain();
+const client = await MidenClient.create({ rpcUrl: 'https://rpc.testnet.miden.io' })
+const xyk = XykClient.from(client)
+const pool = xyk.pool({ poolId, feeFaucetId, noteFees: NOTE_FEES })
 
-const xyk = XykClient.from(client);
-const pool = xyk.pool({
-  poolId,
-  feeFaucetId,
-  noteFees: { swap: 126n }, // the measured schedule; fixed at pool creation
-});
-
-const state = await pool.state();
-
-const result = await pool.swap({
+const state = await fetchPoolState((id) => client.accounts.get(id), poolId)
+const out = await pool.swap({
   sender,
-  recipient,
-  tokenIn: token0,
-  amountIn: 1000n,
+  recipient: sender,
+  tokenIn,
+  amountIn: 1_000_000n,
   slippageBps: 50n,
-  deadline: deadlineFrom(latestBlockTimestamp, 3600n),
-  // submit: true, waitForConfirmation: true,
-});
-
-// result.note, result.sponsorNote, result.request, result.quote,
-// result.minAmountOut, result.tokenOut, result.fee, result.feeFaucetId
+  deadline: BigInt(Math.floor(Date.now() / 1000)) + 3600n,
+})
+// `out.request` is a TransactionRequest. With `{ submit: true }` the client
+// submits it; otherwise hand it to a wallet adapter.
+await client.transactions.submit(sender, out.request)
 ```
 
-# API
-
-All amounts are `bigint` and denominated in the smallest unit of the relevant
-asset. All account ids are the web-sdk `AccountId` type unless stated
-otherwise. `Word4` and `SerialNumber` are four-limb tuples:
-
-```ts
-type Word4 = readonly [bigint, bigint, bigint, bigint];
-type SerialNumber = Word4;
-```
-
-## Constants
-
-| Name | Value | Meaning |
-|------|-------|---------|
-| `MAX_AMOUNT` | `1n << 57n` | Upper bound on every reserve, amount, and `lp_supply`. |
-| `MINIMUM_LIQUIDITY` | `1000n` | LP tokens locked permanently on the first mint. |
-| `FEE_DENOMINATOR` | `10_000n` | Basis-point denominator for both fees. |
-| `MAX_TX_FEE` | `210n` | Operator-solvency ceiling at the current base fee (`7 x 30`); scripts size funding with it, never a note price. |
-| `NOTE_FEES` | `{...}` | Measured schedule price per note kind, in fee-asset base units. |
-| `SLOT_PREFIX` | `"port0::port0"` | Storage slot name prefix shared by all pool slots. |
-| `REGISTRY_SLOT_PREFIX` | `"pool_registry::pool_registry"` | Storage slot name prefix shared by all registry slots. |
-
-`POOL_SLOTS` names the eleven exact value slots:
-
-```ts
-POOL_SLOTS.token0AssetKey
-POOL_SLOTS.token1AssetKey       POOL_SLOTS.lpSupply
-POOL_SLOTS.reserves             POOL_SLOTS.fees
-POOL_SLOTS.p2idRoot             POOL_SLOTS.protocolPot
-POOL_SLOTS.price0CumulativeLast POOL_SLOTS.price1CumulativeLast
-POOL_SLOTS.blockTimestampLast   POOL_SLOTS.registryId
-```
-
-`REGISTRY_SLOTS` names the registry's four maps and eleven value slots:
-`acceptedCodeCommitments`, `pools`, `assetsToPool`, `protocolFeeTo`,
-`protocolFeeShareBps`, `allowedLpFeeBps`, `p2idRoot`,
-`expectedNoteAllowlistRoot`, `expectedTxScriptAllowlistRoot`,
-`expectedFeeScheduleRoot`, `expectedFeeAssetId`, `expectedActiveFeePolicyRoot`,
-`expectedAllowedFeePolicyRoots`, `admin`, `registerNoteRoot`.
-
-`POOL_AUTH_SLOTS` names the six auth and fee slots whose roots the registry pins:
-`noteAllowlistRoot`, `txScriptAllowlistRoot`, `feeScheduleRoot`, `feeAssetId`,
-`activeFeePolicyRoot`, `allowedFeePolicyRoots`.
-
-`POOL_COLLECT_FEE_HOLD`, `REGISTRY_COLLECT_FEE_HOLD`, and `COLLECT_MAX_KEYS` are
-generated from `contracts/collect-fee-hold.rs`, the file both contracts include,
-so the tooling prints the values the contracts enforce.
-
-## Errors
-
-`PoolMathError` is thrown by the pure math functions. Its `kind` is one of
-`EmptyPool`, `Overflow`, `ZeroAmountIn`, `ZeroAmountOut`,
-`InsufficientLiquidity`, `Invariant`. The message string matches the contract's
-`PoolMathError`.
-
-`XykError` is thrown by the SDK layer above the math. Its `code` is one of
-`NOT_A_POOL`, `POOL_NOT_FOUND`, `POOL_NOT_CONFIGURED`, `MISSING_SLOT`,
-`AUTH_SLOT_MISSING`, `INVARIANT`, `INVALID_ARGUMENT`, `UNSUPPORTED_OPERATION`.
-
-## Pure math (`math/quotes.ts`)
-
-These functions have no WASM dependency and mirror the contract arithmetic
-exactly, including check order and rounding.
-
-```ts
-isqrt(n: bigint): bigint
-divCeil(numerator: bigint, denominator: bigint): bigint
-
-amountOut(amountIn, reserveIn, reserveOut, lpFeeBps, protocolFeeShareBps): SwapQuote
-quoteMint(amount0, amount1, reserve0, reserve1, lpSupply): MintQuote
-quoteBurn(amountToBurn, reserve0, reserve1, lpSupply): BurnQuote
-```
-
-`SwapQuote` is `{ amountOut, reserveInAfter, reserveOutAfter, protocolFee }`.
-
-`MintQuote` is `{ liquidityToUser, lpSupplyAfter, reserve0After,
-reserve1After, refund0, refund1 }`.
-
-`BurnQuote` is `{ amount0, amount1, lpSupplyAfter, reserve0After,
-reserve1After }`.
-
-`amountOut` computes, in order:
-
-```
-lp_fee             = floor(lp_fee_bps * amount_in / 10000)
-protocol_fee       = floor(protocol_fee_share_bps * lp_fee / 10000)
-amount_in_with_fee = amount_in * (10000 - lp_fee_bps)
-amount_out         = floor(amount_in_with_fee * reserve_out /
-                           (reserve_in * 10000 + amount_in_with_fee))
-```
-
-The protocol fee is `lp_fee * protocol_fee_share_bps / 10000`, carved out of the
-LP fee, so `amount_out` does not depend on it and the swapper pays the LP fee
-tier. The reserve grows by `amount_in - protocol_fee`. Failure order:
-`ZeroAmountIn`, `EmptyPool`, `Overflow` (any input above `MAX_AMOUNT`),
-`ZeroAmountOut`, `InsufficientLiquidity` (`out >= reserve_out`), `Overflow`
-(`reserve_in_after >= MAX_AMOUNT`).
-
-`quoteMint` on the first deposit mints `isqrt(x * y)` LP tokens and retains
-`MINIMUM_LIQUIDITY`; on later deposits it mints the smaller of the two
-token-contribution ratios, rounds the consumed token amounts up with
-`divCeil`, and refunds the unused remainder. It checks `addAmount(reserve,
-amount)` against `MAX_AMOUNT` before the ratio branch, so an over-sized deposit
-reverts even when part of it would be refunded.
-
-`quoteBurn` returns the proportional share of both reserves. A burn that would
-leave less than `MINIMUM_LIQUIDITY` throws `InsufficientLiquidity`, as does a
-burn whose payout rounds to zero for either token.
-
-## Encoders (`math/encoding.ts`)
-
-```ts
-accountIdFelts(id): [bigint, bigint]          // [prefix, suffix]
-fungibleAssetIdWord(faucetId): Word4          // [0, 0, suffix | 0x11, prefix]
-accountTargetTag(id): bigint                  // top 14 prefix bits, low bits zeroed
-randomSerial(): SerialNumber
-randomSeed(): Uint8Array                      // 32 bytes
-isWord4(value): value is Word4
-ACCOUNT_TARGET_TAG_LEN                        // 14
-```
-
-`AccountIdLike` is the structural account id accepted by the encoders:
-
-```ts
-type AccountIdLike = {
-  prefix(): { asInt(): bigint };
-  suffix(): { asInt(): bigint };
-};
-```
-
-The web-sdk `AccountId` satisfies it. `accountTargetTag` is computed entirely
-in `bigint`; using JS `number` bitwise operators would truncate to int32 and
-produce a negative tag whenever bit 31 of the prefix is set.
-
-## Note storage layouts (`notes/layouts.ts`)
-
-Each function returns `bigint[]` in the exact order the note script asserts.
-
-| Function | Felts | Layout |
-|----------|-------|--------|
-| `mintNoteStorage` | 11 | pool, recipient, serial, tag, deadline, `minLpOut` |
-| `burnNoteStorage` | 12 | pool, recipient, serial, tag, deadline, `minAmount0`, `minAmount1` |
-| `swapNoteStorage` | 11 | pool, recipient, serial, tag, deadline, `minAmountOut` |
-| `collectNoteStorage` | 6 + 4n | pool, serial, one asset key (4) per swept asset |
-| `registerNoteStorage` | 8 | registry, pool, asset0, asset1 |
-| `registryCollectNoteStorage` | 6 + 4n | registry, serial, one asset key (4) per swept asset |
-| `feeSponsorshipStorage` | 7 | feature note id (4), reclaimer `[suffix, prefix]`, reclaim height |
-
-Account ids inside layouts are `[prefix, suffix]`. The reclaimer in
-`feeSponsorshipStorage` is the exception: it is `[suffix, prefix]`, matching
-`FeeSponsorshipNoteStorage`.
-
-## Note builders (`notes/build.ts`, `notes/feeSponsorship.ts`)
-
-Each builder returns a web-sdk `Note`. The XYK feature builders produce a public
-network note with a `NetworkAccountTarget` attachment to the target account.
-
-```ts
-buildMintNote(input: MintNoteInput): Note
-buildBurnNote(input: BurnNoteInput): Note
-buildSwapNote(input: SwapNoteInput): Note
-buildCollectNote(input: CollectNoteInput): Note
-buildRegisterNote(input: RegisterNoteInput): Note
-buildRegistryCollectNote(input: RegistryCollectNoteInput): Note
-buildRegistryConfigNote(input: RegistryConfigNoteInput): Note
-buildLaunchNote(input: LaunchNoteInput): Note
-buildFeeSponsorshipNote(input: FeeSponsorshipNoteInput): Note
-
-p2idRoot(): Word4
-noteScript(kind: NoteKind): NoteScript
-POOL_NOTE_KINDS: readonly PoolNoteKind[]  // ["mint","burn","swap","collect"]
-NOTE_KINDS: readonly NoteKind[]           // POOL_NOTE_KINDS plus "register", "registry-collect", "registry-config", "launch"
-```
-
-Common input fields: `sender`, `poolId`, `recipient` (where applicable),
-`deadline` (a block timestamp; the note reverts if the pool executes after it),
-and the `min_*` slippage bounds. Defaults applied by the builders: `serial`
-defaults to `randomSerial()` and `tag` defaults to `accountTargetTag(recipient)`.
-
-`buildRegisterNote` takes `sender`, `registryId`, `poolId`, `asset0`, and
-`asset1`. The produced note targets the registry and carries the 8-felt
-register layout and no assets.
-
-`buildCollectNote` takes `sender`, `poolId`, `assetKeys`, and an optional
-`serial`. `buildRegistryCollectNote` takes `sender`, `registryId`, `assetKeys`,
-and an optional `serial`. Both target a network account and carry no assets. A
-pool collect must include token0 and token1 to pay the protocol pot; a registry
-collect names the assets whose whole balance it sweeps. The collect note scripts
-cap a note at four asset keys.
-
-`buildRegistryConfigNote` takes `sender`, `registryId`, and `registerFee`. The
-note is accepted only from the registry admin, and only for the register note's
-schedule entry.
-
-`buildLaunchNote` takes `sender`, `faucetId`, `recipient`, and optional `serial`
-and `tag`. The note targets a network faucet and carries the 9-felt launch
-layout. The faucet accepts it only when `sender` is the faucet's owner and the
-supply has not been minted.
-
-A registry admits three note kinds, and `createRegistryAccount` prices all of
-them in the network auth it installs from `NOTE_FEES`: `register` at
-`registerFee`, which defaults to `NOTE_FEES.register` when zero,
-`registry-collect` at `NOTE_FEES["registry-collect"]`, and `registry-config` at
-zero, because the registry pays that fee from the register fees it holds. Every
-admitted
-script root must be priced. A root the fee policy does not price aborts fee
-estimation, so the node's builder never executes a note running it and the
-account's own auth procedure rejects that note as an input. The allowlist is
-initial storage of the auth component, and the procedures that mutate it are
-gated on an authority this account does not install, so changing the admitted
-note kinds means building and deploying a new registry account.
-
-`buildFeeSponsorshipNote` takes `sender`, `target` (the pool or registry),
-`featureNote`, `feeFaucetId`, `feeAmount`, and optional `reclaimer` (defaults
-to `sender`) and `reclaimHeight` (defaults to `0`, disabled). The produced note
-carries exactly one `FungibleAsset(feeFaucetId, feeAmount)` and no attachment.
-
-`noteScript(kind)` deserialises the compiled package from
-`src/generated/contracts.ts` once and caches it.
-
-## Transaction request (`notes/request.ts`)
-
-```ts
-ownOutputNotesRequest(
-  client: MidenClient,
-  notes: Note[],
-  targetPoolId: AccountId,
-): Promise<TransactionRequest>
-```
-
-Builds one `TransactionRequest` with `notes` as own output notes, plus the
-machinery a wallet-executed multisig request needs:
-
-- A three-word `MultisigAuthArgs` preimage,
-  `[boundBlock, 0, 0, 0] || SALT || CONVERSION_INFO` (12 felts), committed with
-  `Poseidon2.hashElements` and declared via `withAuthArg`, with the preimage in
-  the advice map. `SALT` is fresh per request. `CONVERSION_INFO` is
-  `[feeFaucetId.suffix, feeFaucetId.prefix, 1, 1]`, read from
-  `client.feeFaucetId()`. The bound block is `client.getSyncHeight()`.
-- The target pool as a foreign account with empty storage requirements, so the
-  kernel can price the emitted network note through `estimate_note_fee`.
-
-Notes are pushed rather than constructor-consumed so the caller keeps valid
-`Note` references. Async because it reads the client sync height and the chain
-fee faucet. Emits a feature note and its sponsorship note in one transaction.
-
-```ts
-outputNotesRequest(
-  client: MidenClient,
-  notes: Note[],
-  targetAccountId: AccountId,
-): Promise<TransactionRequest>
-```
-
-The twin for an account whose key the client holds. The wallet variant above
-declares the multisig `MultisigAuthArgs` preimage a wallet reads. A local
-account signs instead, and the client attaches the signature and the conversion
-info it fetched itself. This variant declares no auth args and no block numbers,
-and still declares the target account as a foreign account.
-
-Every network note the SDK builds carries `NoteExecutionHint.always()` on its
-`NetworkAccountTarget` attachment. A target built without the hint emits
-`NoteExecutionHint::None`, which tells the node not to schedule the note, and
-the note is never consumed.
-
-## Pool reads (`pool/reads.ts`, `pool/decoding.ts`)
-
-```ts
-decodePoolState(account: Account): PoolState
-fetchPoolState(getAccount, poolId): Promise<PoolState>
-```
-
-`decodePoolState` reads the eleven value slots and the vault. Reserves are the
-pool's stored `reserves` word, matching the contract's `get_reserves`; the vault
-is asserted to cover the reserves plus the protocol pot. A credit the contract
-did not create is never a reserve. It throws `NOT_A_POOL` when the token asset
-keys are missing or zero, `MISSING_SLOT` when the reserves slot is absent, and
-`INVARIANT` when the vault does not cover the recorded reserves and protocol
-pot.
-
-`PoolState` fields: `accountId`, `token0Key`, `token1Key`, `token0FaucetId`,
-`token1FaucetId`, `lpSupply`, `fees` (`lpFeeBps`, `protocolFeeShareBps`),
-`registryId`, `p2idRoot`, `protocolPot` (`amount0`, `amount1`),
-`price0CumulativeLast`, `price1CumulativeLast`, `blockTimestampLast`,
-`reserve0`, `reserve1`, `vaultAssetKeys` (every fungible asset the vault holds).
-The protocol fee destination is not part of pool state: it lives on the registry
-and is read only when the pool collects.
-
-`pool/decoding.ts` exports the individual word decoders: `decodeFeesWord`,
-`decodeAccountIdWord`, `decodeScalarWord`, `decodeProtocolPotWord`,
-`decodeU128Word`, `isZeroWord4`, `assetKeyToFaucetIdFelts`. The u128 decoder
-reads four little-endian 32-bit limbs.
-
-## Pool registry (`pool/registry.ts`)
-
-The registry is a network account that holds the canonical pool set and the
-protocol fee policy.
-
-```ts
-createRegistryAccount(client, params: CreateRegistryAccountParams): Promise<Account>
-deployRegistryAccount(client, registryId, fundingNoteId: string, options?): Promise<TransactionSubmitResult>
-registerPool(client, config: RegistryConfig, params: RegisterPoolParams, options?): Promise<RegisterPoolOutput>
-readRegistryPools(getAccount, registryId): Promise<RegistryPoolEntry[]>
-readRegistryFeePolicy(getAccount, registryId): Promise<RegistryFeePolicy>
-readRegistryPoolForAssets(getAccount, registryId, asset0, asset1): Promise<AccountId | null>
-readRegistryAcceptedCodeCommitments(getAccount, registryId): Promise<Word4[]>
-readRegistryRegisterFee(getAccount, registryId): Promise<bigint>
-readRegistryAdmin(getAccount, registryId): Promise<AccountId>
-parseAccountId(value: AccountId | string): AccountId
-REGISTRY_SLOTS
-```
-
-`CreateRegistryAccountParams` is
-`{ acceptedPoolCodeCommitment: string, feeFaucetId: AccountId | string,
-registerFee: bigint, protocolFeeTo: AccountId | string,
-protocolFeeShareBps: bigint, allowedLpFeeBps: readonly bigint[],
-p2idRoot: Word4, admin: AccountId | string, authRoots: PoolAuthRoots,
-seed?: Uint8Array }`. `createRegistryAccount` builds the
-registry, seeds `accepted_code_commitments` with the accepted pool code
-commitment, seeds `allowed_lp_fee_bps` with the permitted tiers, stores the
-expected pool auth roots and the admin, installs the network auth with the three
-registry note kinds priced, and inserts the account.
-`deployRegistryAccount` consumes a funding note as the first transaction.
-
-`RegistryConfig` is `{ registryId: AccountId, feeFaucetId: AccountId,
-registerFee: bigint }`. `RegisterPoolParams` is `{ sender, poolId, asset0,
-asset1 }`. `registerPool` builds the register network note and its
-FEE_SPONSORSHIP note and assembles one request; the node's transaction builder
-consumes the register note against the registry. `RegisterPoolOutput` is
-`{ note, sponsorNote, request, fee, feeFaucetId }`.
-
-`readRegistryPools` returns every `{ poolId, codeCommitment }` from the
-registry's `pools` map. The node returns at most 1000 entries per map in one
-read; a larger map must be paged with `SyncAccountStorageMaps`.
-
-`readRegistryFeePolicy` returns `{ protocolFeeTo, protocolFeeShareBps,
-allowedLpFeeBps }`. `readRegistryRegisterFee` returns the live register fee from
-the registry's fee schedule, which is authoritative after the admin changes it. A
-pool's fee configuration is frozen at creation and
-validated against this policy by `register`.
-
-`readRegistryPoolForAssets` returns the registered pool for an asset pair, or
-null. `readRegistryAcceptedCodeCommitments` returns the keys of
-`accepted_code_commitments`. `parseAccountId` accepts a hex id with the `0x`
-prefix or a bech32 address.
-
-## Pool creation (`pool/create.ts`, `pool/slots.ts`)
-
-```ts
-createPoolAccount(client, params: CreatePoolAccountParams): Promise<Account>
-buildPoolAccount(client, params: CreatePoolAccountParams): Promise<Account>
-poolCodeCommitment(client, params: Omit<CreatePoolAccountParams, "seed">): Promise<string>
-deployPoolAccount(client, poolId, fundingNoteId: string, options?: DeployOptions): Promise<TransactionSubmitResult>
-createFeeFaucet(client, params: FeeFaucetParams): Promise<Account>
-poolInitSlots(params): PoolInitSlotDefinition[]
-```
-
-`CreatePoolAccountParams` is `{ token0Key: Word4, token1Key: Word4, token0Symbol:
-string, token1Symbol: string, registryId: AccountId, lpFeeBps: bigint,
-protocolFeeShareBps: bigint, p2idRoot?: Word4, feeFaucetId: AccountId,
-noteFees?: PoolNoteFees, seed?: Uint8Array }`. The two symbols name the LP token
-(see below); the account's own code commitment is what the registry accepts.
-`PoolNoteFees` is `Partial<Record<PoolNoteKind, bigint>>`. `createPoolAccount`
-builds the pool component from the compiled package and the eleven init slots,
-installs the standard basic fungible faucet component so the LP token carries readable
-metadata (see below), installs the standard `CodeInspection` component, installs
-`AccountComponent.createNetworkAuthComponents` with the fee schedule, and
-inserts the account into the client's local store. It does not deploy.
+## API
+
+Exports are grouped as the modules are. Everything below is re-exported from the
+package root.
+
+### Constants (`constants.ts`)
+
+| Export | Value or meaning |
+| --- | --- |
+| `MAX_AMOUNT` | `2^57`, the AMM's amount bound |
+| `MINIMUM_LIQUIDITY` | `1000n`, LP tokens locked by the first mint |
+| `FEE_DENOMINATOR` | `10000n`, the bps denominator |
+| `MAX_TX_FEE` | `210n`, the largest fee the kernel can charge at base fee 7; scripts size funding with it, never a note price |
+| `NOTE_FEES` | Schedule price per note kind: `126` for `mint`, `burn`, `swap`, `collect`; `119` for `register`, `registry-collect`, `launch`; `0` for `registry-config` |
+| `POOL_SLOTS`, `REGISTRY_SLOTS`, `POOL_AUTH_SLOTS` | Storage slot names the contracts use |
+| `SLOT_PREFIX`, `REGISTRY_SLOT_PREFIX` | Slot name prefixes |
+| `POOL_COLLECT_FEE_HOLD`, `REGISTRY_COLLECT_FEE_HOLD`, `COLLECT_MAX_KEYS` | Generated from the contracts' `collect-fee-hold.rs` |
+
+`NOTE_FEES` is measured by `cargo test -p integration --release note_fee_benchmark`
+at verification base fee 7: the kernel fee for the most expensive path plus the
+pricer's one-cycle margin. Regenerate it when a note script's cycle count changes.
+
+### Pure math (`math/quotes.ts`)
+
+| Export | Result |
+| --- | --- |
+| `isqrt`, `divCeil` | Integer helpers with the contracts' rounding |
+| `amountOut(tokenInIs0, amountIn, reserveIn, reserveOut, lpFeeBps, protocolFeeShareBps)` | `{ amountOut, reserveInAfter, reserveOutAfter, protocolFee }` |
+| `quoteMint(amount0, amount1, reserve0, reserve1, lpSupply)` | `{ liquidityToUser, lpSupplyAfter, reserve0After, reserve1After, refund0, refund1 }` |
+| `quoteBurn(lpAmount, reserve0, reserve1, lpSupply)` | `{ amount0, amount1, lpSupplyAfter, reserve0After, reserve1After }` |
+| `PoolMathError`, `PoolMathErrorKind` | The contracts' failure conditions |
+
+The protocol's share is carved out of the LP fee, so the swap output does not
+depend on it.
+
+### Encoders (`math/encoding.ts`)
+
+`accountIdFelts`, `fungibleAssetIdWord`, `accountTargetTag`, `randomSerial`,
+`randomSeed`, `isWord4`, and the `Word4`, `SerialNumber`, `AccountIdLike` types.
+Account ids are `[prefix, suffix]`; the account-target tag is the top 14 bits of the
+prefix's high word.
+
+### Note storage layouts (`notes/layouts.ts`)
+
+`mintNoteStorage`, `burnNoteStorage`, `swapNoteStorage`, `collectNoteStorage`,
+`registryCollectNoteStorage`, `registerNoteStorage`. Pure functions, WASM-free, so
+they are unit-tested against the lengths the scripts assert.
+
+### Note builders (`notes/build.ts`, `notes/feeSponsorship.ts`)
+
+Every builder returns a public note carrying a `NetworkAccountTarget` attachment to
+the account that must consume it, except the sponsorship note, which has none.
+
+| Builder | Target | Assets | Storage |
+| --- | --- | --- | --- |
+| `buildMintNote` | pool | token0 and token1 | pool, recipient, serial, tag, `minLpOut`, deadline |
+| `buildBurnNote` | pool | LP token | pool, recipient, serial, tag, `minToken0Out`, `minToken1Out`, deadline |
+| `buildSwapNote` | pool | token in | pool, recipient, serial, tag, `minAmountOut`, deadline |
+| `buildCollectNote` | pool | none | pool, serial, asset keys |
+| `buildRegisterNote` | registry | none | registry, pool, asset0, asset1 |
+| `buildRegistryCollectNote` | registry | none | registry, serial, asset keys |
+| `buildRegistryConfigNote` | registry | none | registry, new register fee, register note root |
+| `buildLaunchNote` | network faucet | none | faucet, recipient, serial, tag |
+| `buildFeeSponsorshipNote` | pool or registry | one fungible asset | feature note id, reclaimer, reclaim height |
+
+`serial` defaults to `randomSerial()` and `tag` to `accountTargetTag(recipient)`.
+A deadline is a block timestamp; the pool reverts if it executes after it.
+
+Two rules the layouts do not show: a pool collect must name token0 and token1 to
+pay the protocol pot, because a pool cannot enumerate its own vault, and both
+collect scripts cap a note at four asset keys. A launch note is accepted only from
+the faucet's owner, and only before the supply is minted.
+
+Pricing belongs to the account, not the note. `noteScript(kind)` deserialises the
+compiled package from `src/generated/contracts.ts` once and caches it;
+`POOL_NOTE_KINDS` is the four a pool admits, `NOTE_KINDS` adds `register`,
+`registry-collect`, `registry-config`, and `launch`.
+
+### Transaction request (`notes/request.ts`)
+
+| Variant | Use |
+| --- | --- |
+| `ownOutputNotesRequest(client, notes, target)` | A wallet signs. Declares the multisig three-word auth-args preimage, because the wallet account is private and cannot be built by `feeAwareTransactionRequestBuilder` |
+| `outputNotesRequest(client, notes, target)` | The client's own key signs. Declares neither auth args nor block numbers; the client attaches its signature and the conversion info it fetched |
+
+Both declare the target as a foreign account, because the kernel calls
+`estimate_note_fee` on it to price the emitted note.
+
+### Pool reads (`pool/reads.ts`, `pool/decoding.ts`, `pool/discovery.ts`)
+
+| Export | Result |
+| --- | --- |
+| `fetchPoolState(getAccount, poolId)` | `PoolState` from the account |
+| `decodePoolState(account)` | The same, from an `Account` already in hand |
+| `decodeFeesWord`, `decodeAccountIdWord`, `decodeScalarWord`, `decodeReservesWord`, `decodeProtocolPotWord`, `decodeU128Word`, `assetKeyToFaucetIdFelts`, `isZeroWord4` | Single-word decoders |
+| `xykNoteScriptRoots()`, `isXykPool(account)` | Identify a pool locally: a network account whose allowlist holds every XYK note root |
+| `PoolRegistry` | Local pool map |
+
+`PoolState` is `{ accountId, token0Key, token1Key, token0FaucetId, token1FaucetId,
+reserve0, reserve1, lpSupply, fees, protocolPot, price0CumulativeLast,
+price1CumulativeLast, blockTimestampLast, registryId, vaultAssetKeys }`. Reserves
+are the contract's stored accounting; a credit the contract did not create is never
+a reserve.
+
+### Pool registry (`pool/registry.ts`)
+
+| Export | Result |
+| --- | --- |
+| `createRegistryAccount(client, params)` | Builds the registry and inserts it into the store |
+| `deployRegistryAccount(client, registryId, fundingNoteId, options?)` | Consumes the funding note as its first transaction |
+| `registerPool(client, config, params, options?)` | `{ request, note, sponsorNote, fee }` for a register note |
+| `readRegistryPools`, `readRegistryPoolForAssets`, `readRegistryAcceptedCodeCommitments`, `readRegistryFeePolicy`, `readRegistryRegisterFee`, `readRegistryAdmin` | Reads, each taking `(getAccount, registryId)` |
+| `parseAccountId(value)` | Hex or bech32 to `AccountId` |
+| `REGISTRY_SLOTS` | Slot names |
+
+`CreateRegistryAccountParams` is `{ acceptedPoolCodeCommitment, feeFaucetId,
+registerFee, protocolFeeTo, protocolFeeShareBps, allowedLpFeeBps, p2idRoot, admin,
+authRoots, seed? }`. The registry admits three note kinds:
+
+| Admitted kind | Price |
+| --- | --- |
+| `register` | `registerFee`, defaulting to `NOTE_FEES.register` when zero |
+| `registry-collect` | `NOTE_FEES['registry-collect']` |
+| `registry-config` | `0`, paid by the registry from the register fees it holds |
+
+Every admitted root must carry a price: a root the fee policy does not price aborts
+fee estimation, so the node's builder never executes that note and the account's
+auth rejects it as an input. The allowlist is initial storage and its mutators are
+gated on an authority this account does not install, so changing the admitted kinds
+means deploying a new registry.
+
+One account read returns at most 1000 map entries. Above that the map must be paged
+with `SyncAccountStorageMaps`; `readRegistryPools` throws `INVARIANT` rather than
+return a partial list.
+
+### Pool creation (`pool/create.ts`, `pool/slots.ts`)
+
+| Export | Result |
+| --- | --- |
+| `createPoolAccount(client, params)` | Builds the pool and inserts it into the store |
+| `buildPoolAccount(client, params)` | The same, without inserting |
+| `poolCodeCommitment(client, params)` | The code commitment the registry must accept |
+| `poolAuthRoots(client, params)` | The six storage roots a registry pins |
+| `deployPoolAccount(client, poolId, fundingNoteId, options?)` | Consumes the funding note as its first transaction |
+| `createFeeFaucet(client, params)` | A public fungible faucet |
+| `poolInitSlots(params)` | The eleven initial storage slots |
+
+`CreatePoolAccountParams` is `{ token0Key, token1Key, token0Symbol, token1Symbol,
+registryId, lpFeeBps, protocolFeeShareBps, p2idRoot?, feeFaucetId, noteFees?,
+seed? }`. The two symbols name the LP token.
+
+The pool account carries the `port0` component, the standard basic fungible faucet
+component (the LP token's name and symbol), `CodeInspection` (the commitment the
+registry reads), and the network auth. It is its own LP faucet: the contract
+derives the LP asset id from the pool's account id.
 
 #### LP token metadata
 
-A pool account is its own LP faucet: the contract derives the LP asset id from
-the pool's account id, and the kernel lets an account mint assets whose faucet
-id is its own. Without the standard faucet component the account exposes no
-name, symbol, or decimals, and wallets render the LP token as "Unknown". The
-SDK therefore compiles the standard basic fungible faucet component
-(`miden-standards`, namespace
-`miden::standards::components::faucets::fungible_faucet`) and installs it with
-the standards' storage layout:
-
 | Field | Value |
 | --- | --- |
-| Symbol | `PO` plus up to five A-Z letters of each side's symbol, e.g. `POUSDCXAAA` |
+| Symbol | `PO` plus up to five A–Z letters of each side, e.g. `POUSDCXAAA` |
 | Name | `port0 LP <token0>/<token1>` |
-| Decimals | `0`, matching the app's raw-unit LP display |
-| Max supply | `AssetAmount::MAX` (`2^63 - 2^31`), the protocol maximum; the pool mints through the kernel, which bounds the amount but does not read the faucet config |
-| Mutability | none: the max supply cannot be changed later |
+| Decimals | `0`; the app shows LP amounts in raw units |
+| Max supply | `2^63 - 2^31`, the protocol's maximum fungible amount |
 
-`TokenSymbol` allows uppercase ASCII letters only, 1 to 12 characters, so a
-digit prefix such as `P0` is rejected by the protocol. The metadata is fixed
-when the account is built; changing it means a new pool.
+`TokenSymbol` allows uppercase ASCII letters only, 1 to 12 characters, so a digit
+prefix such as `P0` is not representable. The metadata is fixed when the pool
+account is built. `standardFaucetComponent` and `fungibleFaucetSlots` expose the
+same component and layout for arbitrary metadata.
 
-`CodeInspection` exposes `get_code_commitment`,
-which the registry calls over FPI to verify the pool code at registration. The
-SDK compiles the component through the client's standards library and caches it
-per client, so the pool account's code commitment matches the value the
-registry accepts.
+### Network faucet (`pool/networkFaucet.ts`)
 
-`buildPoolAccount` builds without inserting, for commitment computation or
-offline use. `poolCodeCommitment` returns the pool account code commitment as
-lowercase hex, which is the value the registry's `accepted_code_commitments`
-map must hold. It is computed through the same path as `createPoolAccount`, so
-it cannot drift from a deployed pool. The account seed and the storage values
-do not affect it.
+| Export | Result |
+| --- | --- |
+| `createNetworkFaucet(client, params)` | Builds a fixed-supply faucet and inserts it |
+| `buildNetworkFaucet(client, params)` | The same, without inserting |
+| `deployNetworkFaucet(client, faucetId, fundingNoteId, options?)` | Consumes the funding note as its first transaction |
+| `LAUNCH_FEE` | `119n`, the launch note price |
 
-`deployPoolAccount` consumes `fundingNoteId` as the pool's first transaction.
-A network account rejects a transaction with no effect with
-`ERR_NETWORK_ACCOUNT_TRANSACTION_HAS_NO_EFFECT`, so an empty scriptless deploy
-fails; consuming a funding note both commits the account and pays its first
-transaction fee from the received funds. The pool
-is funded first with a small chain fee asset note. The pool id is passed to
-`transactions.consume` as a hex string, not as an `AccountId`, because the
-client re-parses account references worker-side. `DeployOptions` forwards
-`waitForConfirmation`.
+`CreateNetworkFaucetParams` is `{ name, symbol, decimals, maxSupply, owner,
+feeFaucetId, seed? }`. A network account is exempt from a keyed-account allowlist,
+so launching a token needs no invitation code. A launch mints the whole supply once
+to the owner and records it; nothing can be minted afterwards.
 
-`createFeeFaucet` uses `FaucetType.FungibleFaucet` and creates a public
-fungible faucet. It is not the pool's network note fee asset: a pool's
-`feeFaucetId` must be the chain fee faucet (`client.feeFaucetId()`, USDCX on
-the testnet) or the node never consumes the pool's notes. Use this helper
-only for an application faucet that needs ongoing minting. A fixed-supply token
-that mints once is a network faucet.
+### Pool config (`pool/config.ts`)
 
-`poolInitSlots({ token0Key, token1Key, registryId, lpFeeBps,
-protocolFeeShareBps, p2idRoot })` returns the eleven `PoolInitSlotDefinition`
-entries used at account creation.
+`PoolConfig` is `{ poolId, feeFaucetId, noteFees? }`; `noteFee(schedule, kind)`
+resolves one price with `NOTE_FEES` as the fallback. `DEFAULT_DEADLINE_MARGIN_SECONDS`
+is one hour.
 
-## Network faucet (`pool/networkFaucet.ts`, `pool/lpFaucet.ts`)
+### Operations (`ops/operations.ts`, `ops/helpers.ts`)
 
-```ts
-buildNetworkFaucet(client, params: CreateNetworkFaucetParams): Promise<Account>
-createNetworkFaucet(client, params: CreateNetworkFaucetParams): Promise<Account>
-deployNetworkFaucet(client, faucetId, fundingNoteId, options?): Promise<TransactionSubmitResult>
-LAUNCH_FEE: bigint
+| Operation | Params |
+| --- | --- |
+| `swap(client, config, params, options?)` | `{ sender, recipient, tokenIn, amountIn, slippageBps, deadline }` |
+| `addLiquidity` | `{ sender, recipient, amount0, amount1, slippageBps, deadline }` |
+| `removeLiquidity` | `{ sender, recipient, amountLp, slippageBps, deadline }` |
+| `collectFees` | `{ sender, assetKeys? }`, defaulting to every fungible asset in the vault |
+| `registerPool` | `{ sender, poolId, asset0, asset1 }` |
 
-standardFaucetComponent(client, params): Promise<AccountComponent>
-fungibleFaucetSlots(params): PoolInitSlotDefinition[]
-```
+Each runs the local quote, applies the slippage bound, builds the feature note and
+its sponsorship, and returns `{ note, sponsorNote, request, fee, feeFaucetId }`.
+`SubmitOptions` is `{ submit?, waitForConfirmation? }`: with `submit` the client
+sends the request, otherwise the caller hands it to a wallet. `applySlippage`,
+`resolveSwapSide`, and `deadlineFrom` are the helpers.
 
-A network faucet is a fixed-supply token whose faucet is a network account, so
-it needs no allowlist entry on a gated network. `CreateNetworkFaucetParams` is
-`{ name, symbol, decimals, maxSupply, owner, feeFaucetId, seed? }`. The account
-carries the `network-faucet` component (owner and launch flag), the standard
-basic fungible faucet component (name, symbol, decimals, maximum supply), and the
-network auth that allowlists the launch note at `LAUNCH_FEE`.
+### Facade (`client.ts`)
 
-`buildNetworkFaucet` builds without inserting; `createNetworkFaucet` inserts it
-into the client store; `deployNetworkFaucet` consumes a funding note as the
-account's first transaction. The supply is minted later, by a launch note from
-the owner.
+`XykClient.from(client)` wraps a `MidenClient`; `xyk.pool(config)` returns a `Pool`
+whose methods are the operations above with the pool's config applied.
+`xyk.createPoolAccount`, `buildPoolAccount`, `poolCodeCommitment`, `poolAuthRoots`,
+`deployPoolAccount`, `createRegistryAccount`, `deployRegistryAccount`,
+`createFeeFaucet`, and `createNetworkFaucet` forward to the module functions.
 
-`standardFaucetComponent` and `fungibleFaucetSlots` expose the standards' faucet
-component and its storage layout for arbitrary metadata; the pool's LP token uses
-the same pair with its own symbol, name, decimals, and maximum supply.
+### Artifacts and WASM
 
-## Pool config (`pool/config.ts`)
+`contractPackageBytes(kind)` returns the compiled `.masp` bytes; `CONTRACT_KINDS`
+lists them; `wasmModule()` returns the full web-sdk module on both platforms. The
+generated artifacts live in `src/generated/contracts.ts`, and the collect holds in
+`src/generated/fees.ts`.
 
-```ts
-type PoolConfig = {
-  poolId: AccountId;
-  feeFaucetId: AccountId;
-  noteFees: PoolNoteFees;
-  deadlineMarginSeconds?: bigint;
-};
-
-noteFee(noteFees: PoolNoteFees, kind: PoolNoteKind): bigint
-DEFAULT_DEADLINE_MARGIN_SECONDS   // 3600n
-```
-
-`noteFee` returns the configured fee for a kind, or `0n` when unset. The fee
-schedule is fixed at pool creation and must be kept by the application for
-building correct sponsorship notes.
-
-## Discovery (`pool/discovery.ts`)
-
-```ts
-isXykPool(account: Account): boolean
-xykNoteScriptRoots(): Record<PoolNoteKind, string>
-class PoolRegistry { register(poolId); get(canonicalId); list() }
-```
-
-`isXykPool` returns true when the account is a network account whose
-note-script allowlist contains all four XYK pool note roots. The node RPC has no
-account-listing-by-code-root endpoint, so chain-wide discovery is left to the
-product's indexer; `PoolRegistry` holds the pool ids the application knows.
-
-## Operations (`ops/operations.ts`, `ops/helpers.ts`)
-
-Each operation has the shape `(client, config, state, params, options?)` and
-runs the local quote, applies the slippage bound, builds the feature note and
-its sponsorship note, and assembles the combined request.
-
-```ts
-swap(client, config, state, params: SwapParams, options?): Promise<SwapOutput>
-addLiquidity(client, config, state, params: MintParams, options?): Promise<MintOutput>
-removeLiquidity(client, config, state, params: BurnParams, options?): Promise<BurnOutput>
-collectFees(client, config, state, params: CollectParams, options?): Promise<OperationOutput>
-registerPool(client, config: RegistryConfig, params: RegisterPoolParams, options?): Promise<RegisterPoolOutput>
-```
-
-`OperationOutput` is `{ note, sponsorNote, request, fee, feeFaucetId }`.
-`SwapOutput` adds `{ quote, tokenOut, minAmountOut }`. `MintOutput` adds
-`{ quote, minLpOut }`. `BurnOutput` adds `{ quote, minAmount0, minAmount1 }`.
-
-`SubmitOptions` is `{ submit?: boolean, waitForConfirmation?: boolean }`.
-`submit` defaults to `false`, so the caller receives the request and hands it
-to a wallet adapter; set `submit: true` to send it through the `MidenClient`.
-
-`SwapParams`: `sender`, `recipient`, `tokenIn`, `amountIn`, `slippageBps`,
-`deadline`, optional `serial`, `tag`. `MintParams`: `sender`, `recipient`,
-`amount0`, `amount1`, `slippageBps`, `deadline`, optional `serial`, `tag`.
-`BurnParams`: `sender`, `recipient`, `amountLp`, `slippageBps`, `deadline`,
-optional `serial`, `tag`. `CollectParams`: `sender`, optional `assetKeys`
-(defaults to every fungible asset the pool's vault holds), optional `serial`.
-`RegisterPoolParams`: `sender`, `poolId`, `asset0`, `asset1`.
-
-Helpers:
-
-```ts
-applySlippage(amount: bigint, slippageBps: bigint): bigint
-resolveSwapSide(tokenIn: string, token0: string, token1: string): 0 | 1
-deadlineFrom(blockTimestampSeconds: bigint, marginSeconds: bigint): bigint
-```
-
-`applySlippage` returns `floor(amount * (10000 - slippageBps) / 10000)` and
-throws `INVALID_ARGUMENT` for `slippageBps` outside `[0, 10000)`.
-`resolveSwapSide` throws `INVALID_ARGUMENT` when `tokenIn` matches neither
-side. `deadlineFrom` is `blockTimestampSeconds + marginSeconds`.
-
-## Facade (`client.ts`)
-
-```ts
-XykClient.from(client: MidenClient): XykClient
-
-xyk.pool(config: PoolConfig): Pool
-xyk.createPoolAccount(params): Promise<Account>
-xyk.deployPoolAccount(poolId, fundingNoteId, options?): Promise<TransactionSubmitResult>
-xyk.createFeeFaucet(params): Promise<Account>
-xyk.createRegistryAccount(params): Promise<Account>
-xyk.deployRegistryAccount(registryId, fundingNoteId, options?): Promise<TransactionSubmitResult>
-xyk.listRegistryPools(registryId): Promise<RegistryPoolEntry[]>
-xyk.listRegistryAccepted(registryId): Promise<Word4[]>
-xyk.poolForAssets(registryId, asset0, asset1): Promise<AccountId | null>
-xyk.registerPool(config, params, options?): Promise<RegisterPoolOutput>
-```
-
-`Pool` binds a `MidenClient` and a `PoolConfig`:
-
-```ts
-pool.id: AccountId
-pool.state(): Promise<PoolState>
-pool.swap(params, options?): Promise<SwapOutput>
-pool.addLiquidity(params, options?): Promise<MintOutput>
-pool.removeLiquidity(params, options?): Promise<BurnOutput>
-pool.collectFees(params, options?): Promise<OperationOutput>
-```
-
-`Pool` fetches state internally, so the application calls one method per
-action.
-
-## Contract artifacts
-
-```ts
-contractPackageBytes(kind: ContractKind): Uint8Array
-CONTRACT_KINDS: readonly ContractKind[]
-CONTRACT_ARTIFACTS: Record<ContractKind, string>   // base64 .masp
-CONTRACT_SHA256: Record<ContractKind, string>
-GENERATED_AT: string
-wasmModule(): typeof import("@miden-sdk/miden-sdk")
-```
-
-`ContractKind` is `"pool" | "registry" | "mint" | "burn" | "swap" | "collect" |
-"registry-collect" | "register" | "registry-config" | "network-faucet" |
-"launch"`. `wasmModule()` returns the full web-sdk module
-on both browser and Node; the Node entry does not re-export the array wrappers
-as named exports, and this accessor hides that difference.
-
-# Layout
+## Layout
 
 ```
 src/
-  generated/contracts.ts    compiled .masp packages, base64 (GENERATED)
-  constants.ts              pool and registry slot names, math bounds
-  artifacts.ts              decode a contract package to bytes
-  wasm.ts                   cross-platform web-sdk module accessor
-  utils/base64.ts           host-independent base64 decode
-  errors.ts                 XykError codes
-  math/                     quotes, encoding
-  notes/                    layouts, scripts, word, build, feeSponsorship, request
-  pool/                     decoding, reads, slots, create, config, discovery, registry
-  ops/                      helpers, operations
-  client.ts                 XykClient + Pool facade
-scripts/
-  export-contracts.mjs      regenerates src/generated/contracts.ts
-test/
-  *.test.ts                 pure unit tests (vitest)
-  wasm-smoke.mjs            WASM runtime smoke test (plain Node)
+  constants.ts          slot names, amount bounds, note prices
+  client.ts             XykClient and Pool facade
+  artifacts.ts          compiled package bytes
+  wasm.ts               runtime access to the web-sdk module
+  errors.ts             XykError with a stable code
+  math/                 quotes, encoders
+  notes/                storage layouts, builders, request variants, scripts
+  ops/                  swap, add, remove, collect, register
+  pool/                 create, reads, decoding, registry, faucets, discovery
+  generated/            contract artifacts and fee constants
+scripts/                deploy, set fee, collect, commitment
+test/                   vitest suites and the WASM smoke test
 ```
 
-# Regenerating artifacts
-
-The generated file embeds the eight compiled Miden packages from the
-`port0` contracts workspace. Regenerate it whenever the contracts change:
+## Regenerating artifacts
 
 ```sh
-npm run generate          # read existing build artifacts
-npm run generate:build    # cargo miden build first, then read
+npm run generate
 ```
 
-Override the contracts directory with `PORT0_CONTRACTS_DIR`.
+This builds every contract with `cargo miden` and exports the packages into
+`src/generated`. A note that links an account interface embeds that account's
+procedure roots, so an artifact exported before an interface change calls a root
+the account no longer has. Building first is not optional. The contracts repo is
+expected at `../port0_contracts`, overridable with `PORT0_CONTRACTS_DIR`.
 
-# Build and test
+## Build and test
 
 ```sh
-npm install
 npm run typecheck
-npm test                  # pure unit tests
-npm run build             # emits dist/ (ESM + CJS + d.ts)
-npm run test:wasm         # builds, then runs the WASM smoke test in plain Node
-npm run pool:commitment   # prints the accepted pool code commitment
-npm run registry:deploy   # builds, then creates and deploys the registry account
-npm run registry:set-fee  # builds, then changes the registry's register fee
-npm run fees:collect      # builds, then sweeps pool or registry fees
+npm test            # vitest: layouts, quotes, constants, faucet metadata
+npm run test:wasm   # builds, then runs the WASM smoke test under Node
+npm run build       # tsup: ESM, CJS, and types into dist/
 ```
 
-`registry:deploy` uses the Node client with its filesystem store under
-`~/.miden/stores/<PORT0_STORE>/`. Every value that becomes registry policy or
-identifies an account is required and has no default: the fee faucet, the pool
-commitment, the operator, the admin, the register fee, the protocol recipient,
-the protocol share, the LP tiers, the store, the RPC URL, the prover, and the
-note transport. It prints all of them with the account ids in hex and bech32 and
-waits for the deployer to type `deploy`; `--yes` skips the prompt for an
-unattended run.
-
-The admin is the only account that can ever change the register fee, and it
-cannot be rotated. It is compared as an id only, so it may be a wallet account
-whose key never enters the store. The operator is the throwaway keyed account
-that funds the deployment.
-
-When the operator is underfunded the script prints the address and polls until
-the chain fee asset arrives, then funds the registry and consumes the funding
-note. A stored registry is reused only when it accepts the configured pool code
-commitment and admits all three registry note kinds; otherwise a fresh registry
-is deployed. No re-run is needed. See the script header for the environment
-variables.
-
-`fees:collect` sweeps protocol fees:
-
-```sh
-npm run fees:collect -- registry [--submit]
-npm run fees:collect -- pool <pool-id> [--submit]
-```
-
-Without `--submit` it is a dry run: it reports what is claimable, the
-destination, and the cost to the caller, and submits nothing. Each sweep emits
-the collect note and a FEE_SPONSORSHIP note for it, at the schedule price for the
-note kind. A vault with more than four fungible assets is swept in one note per
-four keys. `PORT0_REGISTRY_ID` and `PORT0_FEE_FAUCET_ID` are required. The caller
-is the account named by `PORT0_OPERATOR`, or the first non-network account in
-`PORT0_STORE`.
-
-`registry:set-fee` changes the price of listing a pool:
-
-```sh
-npm run registry:set-fee -- <base-units> [--submit]
-```
-
-Without `--submit` it reads the live fee and reports the change. The note is
-accepted only from the registry's admin, so the caller account must be that
-admin. The registry pays the config note's own fee from the register fees it
-holds.
-
-Copy `.env.example` to `.env` and fill it in. The scripts load `.env` from the
-repo root; real environment variables take precedence, and a missing file is
-not an error.
-
-For the full stack bring-up and the pool deployment flow, see the
-[runbook](https://docs.port0.sh/operations/runbook.html).
-
-The WASM smoke test runs as a plain Node process (`test/wasm-smoke.mjs`) rather
-than under vitest: the web-sdk native module is unreliable inside vitest's
-worker pool.
+`pool:commitment`, `registry:deploy`, `registry:set-fee`, and `fees:collect` run the
+tooling in `scripts/`. They read the variables documented in `.env.example`.
 
 ## Source
 
-Radicle is the canonical source. GitHub and npm are mirrors.
+Radicle is canonical; GitHub is a mirror.
 
 | Source | Location |
 | --- | --- |
-| Radicle | https://radicle.network/nodes/iris.radicle.network/rad%3Az3qSaS569gAZiHRtjiAuxvrCWzhgp |
+| Radicle | https://radicle.network/nodes/iris.radicle.network/rad%3Az3fi1mouSisLs3PhaLxJiUZwhZnLd |
 | GitHub | https://github.com/port0-sh/port0_sdk |
-| npm | https://www.npmjs.com/package/@port0.sh/sdk |

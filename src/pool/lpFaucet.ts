@@ -3,20 +3,15 @@
  *
  * The pool account is its own LP faucet: the contract derives the LP asset id
  * from the pool's account id, and the kernel lets an account mint assets whose
- * faucet id is its own. Without the standard fungible-faucet component the
- * account carries no name, symbol, or decimals, and a wallet shows the LP token
- * as "Unknown", because the account interface exposes no faucet procedures to
- * read them from.
+ * faucet id is its own. The standard fungible-faucet component supplies the name,
+ * symbol, and decimals a wallet reads; without it the LP token shows as
+ * "Unknown", because `BasicFungibleFaucetComponent.fromAccount` matches procedure
+ * roots.
  *
- * This module compiles that standard component from its vendored MASM and gives
- * it the standards' storage layout, so the pool account reports as a fungible
- * faucet with metadata every wallet can read. The metadata is fixed when the
- * pool account is built; changing it means a new pool.
- *
- * Decimals are 0, matching how the app displays LP amounts (raw units), and the
- * max supply is the protocol's own maximum fungible amount: the pool mints
- * through the kernel, which bounds the amount but does not consult the faucet
- * config, so the value is the representable maximum rather than a policy cap.
+ * The metadata is fixed when the pool account is built: changing it means a new
+ * pool. Decimals are 0, matching the app's raw-unit display, and the max supply is
+ * the protocol's maximum fungible amount, which the kernel bounds and the faucet
+ * config does not police.
  */
 import {
   AccountComponent,

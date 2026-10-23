@@ -11,22 +11,13 @@ import {
 import { wasmModule } from "../wasm.js";
 
 /**
- * Wraps `notes` as own output notes of a single transaction request.
+ * Emits `notes` as own output notes of one request the wallet signs.
  *
- * Used to emit a feature note together with its FEE_SPONSORSHIP note in one
- * transaction. The notes are pushed (not constructor-consumed) so the caller
- * keeps valid references to them after the request is built.
- *
- * 0.17 requirements this satisfies:
- * - Every multisig flavour (the Bread wallet is a Guarded Multisig) reads a
- *   three-word `MultisigAuthArgs` preimage from the advice map:
- *   `[bound_block, 0, 0, 0] || SALT || CONVERSION_INFO`. The wallet account is
- *   private and not in the app's client store, so `feeAwareTransactionRequestBuilder`
- *   cannot build it; the commitment (Poseidon2 hash of the 12 felts) and its
- *   preimage are declared here manually.
- * - The kernel prices the emitted network note by calling `estimate_note_fee`
- *   on the target pool, so the pool is declared as a foreign account (empty
- *   storage requirements; the client resolves a public target lazily).
+ * The wallet account is private, so its three-word `MultisigAuthArgs` preimage
+ * cannot be built by `feeAwareTransactionRequestBuilder`; it is declared here as
+ * `[bound_block, 0, 0, 0] || SALT || CONVERSION_INFO` with the Poseidon2
+ * commitment as the auth argument. The target is declared as a foreign account
+ * because the kernel calls `estimate_note_fee` on it to price the emitted note.
  */
 export async function ownOutputNotesRequest(
   client: MidenClient,
@@ -92,20 +83,12 @@ export async function ownOutputNotesRequest(
 }
 
 /**
- * Wraps `notes` as own output notes of a transaction the client signs itself.
+ * Emits `notes` as own output notes of one request the client signs.
  *
- * The twin of `ownOutputNotesRequest`, for an account whose key the client
- * holds. That one declares the multisig `MultisigAuthArgs` preimage a wallet
- * reads, including the conversion info a wallet needs. A local account does not
- * read a preimage: it signs, and the client attaches that signature along with
- * the conversion info it fetched itself. Declaring the multisig preimage for a
- * local sender puts two conversion infos in play and the kernel rejects the
- * transaction with "conversion info loaded from the advice map does not match
- * the commitment provided via the auth args". So this variant declares neither
- * auth args nor block numbers, and leaves both to the client.
- *
- * The target account is still declared as a foreign account: the kernel prices
- * the emitted network note by calling `estimate_note_fee` on it.
+ * Declares neither auth args nor block numbers: the client attaches its signature
+ * and the conversion info it fetched itself, and declaring the multisig preimage
+ * as well puts two conversion infos in play, which the kernel rejects. The target
+ * is declared as a foreign account for note-fee estimation.
  */
 export async function outputNotesRequest(
   client: MidenClient,

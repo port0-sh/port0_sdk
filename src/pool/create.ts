@@ -185,16 +185,13 @@ export async function poolCodeCommitment(
 }
 
 /**
- * The storage roots a registry must require of every pool: its two allowlist
- * maps, its fee schedule, and the fee manager's own three items. Read from a
- * reference pool build, so they cannot drift from what `buildPoolAccount`
- * installs. The pool's payout root is compared against the registry's P2ID root
- * instead, since both must be the standard P2ID script.
+ * The storage roots a registry requires of every pool: its two allowlist maps,
+ * its fee schedule, and the fee manager's three items, read from a reference
+ * build so they cannot drift from `buildPoolAccount`. The payout root is compared
+ * against the registry's P2ID root instead.
  *
- * A pool carries the accepted code but its own storage, and an allowlist of its
- * own would admit a note that drains the vault through the wallet's
- * `move_asset_to_note`. The registry stores these roots at creation and compares
- * them on every registration.
+ * The code commitment pins code, not storage; without these a pool could admit a
+ * note that drains its vault through the wallet's `move_asset_to_note`.
  */
 export interface PoolAuthRoots {
   noteAllowlistRoot: Word4;
@@ -244,11 +241,9 @@ export interface DeployOptions {
 }
 
 /**
- * Deploys a network-account pool by consuming a funding note as its first
- * transaction. The 0.17 network auth rejects transactions with no effect, so
- * an empty scriptless transaction no longer commits the account; consuming an
- * input note both commits the account and pays its first transaction fee from
- * the received funds.
+ * Deploys a pool by consuming a funding note as its first transaction: the note
+ * commits the account and pays the fee, because the network auth rejects an
+ * empty transaction.
  */
 export async function deployPoolAccount(
   client: MidenClient,

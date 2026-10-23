@@ -1,15 +1,14 @@
 /**
- * Reads of the on-chain pool registry account.
+ * Reads of the on-chain pool registry.
  *
- * The registry stores three storage maps. Keys and values are four-felt words:
- * a pool id key is `[prefix, suffix, 0, 0]`; an ordered asset pair key is
- * `[lo.prefix, lo.suffix, hi.prefix, hi.suffix]`; a code commitment is the
- * pool account's code commitment.
+ * Three storage maps, keyed and valued by four-felt words: a pool id key is
+ * `[prefix, suffix, 0, 0]`, an ordered asset pair key is
+ * `[lo.prefix, lo.suffix, hi.prefix, hi.suffix]`, and a commitment is the pool
+ * account's code commitment.
  *
- * The node returns at most 1000 entries per map in one `getAccountDetails`
- * response. Above that, the registry map must be paged with
- * `SyncAccountStorageMaps`; the SDK reports the truncation rather than
- * returning a partial list.
+ * One account read returns at most 1000 map entries. Above that the map must be
+ * paged with `SyncAccountStorageMaps`; these readers report the truncation rather
+ * than return a partial list.
  */
 import {
   Account,
@@ -95,12 +94,9 @@ export async function readRegistryPools(
 }
 
 /**
- * The registry's fee policy: who receives protocol fees, at what rate, and
- * which LP fee tiers a pool may charge.
- *
- * A pool's own fee configuration is frozen at creation and validated against
- * this by `register`, so a creator must build the pool with these values. They
- * are read rather than configured, because the registry is what enforces them.
+ * The registry's fee policy: protocol fee recipient, share, and the LP tiers a
+ * pool may charge. A pool is built with these values and `register` rejects any
+ * other, so they are read rather than configured.
  */
 export interface RegistryFeePolicy {
   protocolFeeTo: AccountId;

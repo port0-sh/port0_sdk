@@ -1,11 +1,7 @@
 /**
- * Pure TS ports of the pool math in the `port0` contracts workspace
- * (`contracts/port0/src/amm`).
- *
- * Every function mirrors the Rust implementation exactly: same argument order,
- * same rounding (floor division, `div_ceil` for the LP-favouring mint amounts),
- * and the same failure conditions in the same order. Amounts are non-negative
- * `bigint` values bounded by `MAX_AMOUNT` where the contract bounds them.
+ * TS ports of `contracts/port0/src/amm`. Same argument order, same rounding,
+ * same failure conditions; amounts are `bigint` bounded by `MAX_AMOUNT` where the
+ * contract bounds them.
  */
 import {
   FEE_DENOMINATOR,

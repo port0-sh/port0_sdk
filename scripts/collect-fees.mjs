@@ -1,45 +1,19 @@
 #!/usr/bin/env node
 /**
- * Sweeps protocol fees to the fee recipient.
+ * Sweeps protocol fees to the destination the registry names.
  *
  *   node scripts/collect-fees.mjs registry [--submit]
  *   node scripts/collect-fees.mjs pool <pool-id> [--submit]
  *
- * Dry run by default: it reports what is claimable, where it would go, and what
- * the sweep costs the caller, and submits nothing. `--submit` performs it.
+ * Reports what is claimable and what the sweep costs, then with `--submit` emits
+ * the collect note and its sponsorship. Both sweeps are permissionless: the
+ * destination comes from registry storage, so a caller can only flush value
+ * toward it. A vault with more fungible assets than the note script accepts is
+ * swept in batches. If the network builder has not consumed the note within
+ * `PORT0_PAYOUT_WAIT_SECS`, the script builds and submits that payout itself.
  *
- * Two pots, two notes:
- *
- * - The registry holds the register fees it charged, in the chain fee asset, and
- *   pays them out when a `registry-collect` note targeting it is consumed.
- * - A pool holds the protocol's share of its LP fees, in its own two tokens, and
- *   pays them to the destination the registry names, read over FPI when its
- *   `collect` note is consumed.
- *
- * Both are permissionless. The script lets the network transaction builder
- * consume each collect note. If that has not happened by the end of the wait
- * window, it builds, executes, and submits that same transaction itself, since
- * a network account's auth admits any transaction whose consumed note script
- * roots are allowlisted.
- *
- * A pool collect travels with a FEE_SPONSORSHIP note, because the pool's fee
- * schedule prices the collect root: the node requires the note fee to be
- * prepaid, and the caller pays it on top of its own transaction fee. A registry
- * prices its collect root at zero, so its sweep needs no sponsorship: the
- * contract leaves the transaction's own fee in the vault (`tx::compute_fee`) and
- * the registry pays it from the swept balance.
- *
- * Buying the fee asset is not required. A few hundred base units in the store's
- * account covers many sweeps at the measured 133 per transaction.
- *
- * Environment (from the environment or a `.env` file in this directory):
- *   PORT0_REGISTRY_ID     required for the registry target
- *   PORT0_FEE_FAUCET_ID   required, chain fee faucet
- *   MIDEN_RPC_URL         default https://rpc.testnet.miden.io
- *   PORT0_PROVER          default testnet
- *   PORT0_STORE           default port0-registry, must hold the caller's key
- *   PORT0_OPERATOR        optional, caller account id; defaults to the first
- *                         non-network account in the store
+ * Reads `PORT0_REGISTRY_ID`, `PORT0_FEE_FAUCET_ID`, `PORT0_OPERATOR`,
+ * `PORT0_STORE`, `MIDEN_RPC_URL`, `PORT0_PROVER`, `PORT0_NOTE_TRANSPORT`.
  */
 import { existsSync } from "node:fs";
 import {

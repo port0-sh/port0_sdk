@@ -42,16 +42,9 @@ export interface SubmitOptions {
 }
 
 /**
- * Builds the emit request for the sender kind.
- *
- * A wallet sender reads the multisig auth-args preimage the request declares,
- * so the wallet variant is used when the caller submits through an adapter. A
- * local sender signs and the client attaches the conversion info itself, so
- * declaring the preimage would put two conversion infos in play and the kernel
- * rejects the transaction with "conversion info loaded from the advice map does
- * not match the commitment provided via the auth args". Selection follows
- * `options.submit`: a local sender is exactly the caller that asks the client
- * to submit.
+ * Picks the request variant by who submits: a local sender answers `submit`, and
+ * everything else is a wallet. The two variants differ in whether they declare
+ * the multisig auth args; see `notes/request.ts`.
  */
 function notesRequest(
   client: MidenClient,

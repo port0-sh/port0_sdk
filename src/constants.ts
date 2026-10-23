@@ -20,28 +20,22 @@ export const MINIMUM_LIQUIDITY: bigint = 1000n;
 export const FEE_DENOMINATOR: bigint = 10_000n;
 
 /**
- * Operator-solvency ceiling, in fee-asset base units.
- *
- * The kernel charges `verification_base_fee * (ilog2(total_cycles) + 1)` and caps a transaction at
- * `MAX_TX_EXECUTION_CYCLES = 2^29`, so the maximum is `base_fee * 30`. On the 0.17 testnet the
- * base fee is 7, giving 210. Scripts use it to size an operator's funding, never as a note price:
- * the surplus stays with the operator. Note sponsorships use `NOTE_FEES`.
+ * Operator-solvency ceiling, in fee-asset base units: the largest fee the kernel
+ * can charge, `base_fee * 30` (210 at base fee 7). Scripts size an operator's
+ * funding with it; note prices come from `NOTE_FEES`.
  */
 export const MAX_TX_FEE: bigint = 210n;
 
 /**
  * Schedule price per note kind, in fee-asset base units.
  *
- * Measured by `cargo test -p integration --release note_fee_benchmark` on a
- * MockChain network-account transaction at verification base fee 7, the 0.17
- * testnet value. Each price is the kernel fee for the most expensive measured
- * path plus the `NetworkNotePricer` margin of one verification cycle (7 base
- * units). The pool and registry fee schedules store these values, and an
- * emitter's sponsorship equals the schedule entry for its note kind.
+ * Each value is the kernel fee for the most expensive measured path plus the
+ * pricer's one-cycle margin, at verification base fee 7. The pool and registry
+ * fee schedules store them, and a sponsorship equals the schedule entry.
  *
- * Regenerate the table when a note script changes its cycle count; a root
- * change alone does not change the price. The collect scripts cap a note at
- * four asset keys, which is the key count these prices cover.
+ * Measured by `note_fee_benchmark`. Regenerate when a note script's cycle count
+ * changes, not when its root changes. The collect prices cover four asset keys,
+ * the cap the collect scripts enforce.
  */
 export const NOTE_FEES: Record<NoteKind, bigint> = {
   mint: 126n,
@@ -61,11 +55,8 @@ export const NOTE_FEES: Record<NoteKind, bigint> = {
 };
 
 /**
- * Storage slot name prefix shared by every `port0` component slot.
- *
- * Slot names are `<package_name>::<interface_segment>::<field_name>`; the
- * package name is `port0` and the interface segment is `port0`, both
- * sanitised to `port0`. Mirrors `integration/tests/port0_test.rs`.
+ * Slot name prefix of every `port0` component slot:
+ * `<package>::<interface>::<field>`, both segments `port0`.
  */
 export const SLOT_PREFIX = "port0::port0";
 

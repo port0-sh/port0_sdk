@@ -1,17 +1,13 @@
 /**
  * Network faucet: a fixed-supply token whose faucet is a network account.
  *
- * A regular faucet is a keyed account, so on a network that gates keyed accounts
- * its first transaction needs an invitation code. A network account is exempt,
- * which is what makes launching a token free of that requirement.
+ * A network account is exempt from a keyed-account allowlist, so launching a
+ * token needs no invitation code. The account carries the standard
+ * fungible-faucet component (metadata and wallet recognition), this component
+ * (owner and launch flag), and the network auth that allowlists the launch note.
  *
- * The account carries the standard basic fungible faucet component, which is what
- * makes a wallet recognize it as a faucet and read its name, symbol, and
- * decimals, plus the `network-faucet` component, which owns the launch and the
- * supply accounting, plus the network auth that allowlists the launch note.
- *
- * The launch is one-way and total: it mints the whole maximum supply once and
- * pays it to a recipient. There is no second mint, by construction.
+ * A launch mints the whole maximum supply once and pays it to a recipient; there
+ * is no second mint.
  */
 import {
   Account,

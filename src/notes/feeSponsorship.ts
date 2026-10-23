@@ -1,14 +1,8 @@
 /**
- * FEE_SPONSORSHIP note builder.
- *
- * Under the network-account fee model the XYK feature note stays fee-unaware;
- * the fee travels in a separate note carrying exactly one fungible asset (the
- * fee, denominated in the pool's fee faucet asset) and the feature note's id in
- * its storage. The two notes are consumed together by the network transaction
- * builder.
- *
- * The sponsorship note is a plain Public note tagged for the pool: it carries
- * no `NetworkAccountTarget` attachment (unlike the feature note).
+ * FEE_SPONSORSHIP note builder. The feature note stays fee-unaware; the fee
+ * travels in a separate Public note carrying one fungible asset and the feature
+ * note's id in its storage, and the network transaction builder consumes the two
+ * together.
  */
 import {
   AccountId,

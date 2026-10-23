@@ -1,54 +1,18 @@
 #!/usr/bin/env node
 /**
- * Creates and deploys the pool registry network account on a live network.
+ * Creates and deploys the pool registry network account.
  *
- * The registry is built by the SDK's own `createRegistryAccount`, so the
- * deployed account's component set matches what the registration path expects.
- * The account is a network account: its first transaction must consume a
- * funding note, so this script funds it from an operator wallet and then
- * consumes that note.
+ *   node scripts/deploy-registry.mjs [--yes]
  *
- * Interactive by default. If the operator wallet is missing or underfunded,
- * the script prints its address and polls until the fee asset arrives, then
- * funds and deploys the registry without a re-run. The wait is bounded by
- * `PORT0_WAIT_SECS` (default 600); on timeout it prints the address and
- * exits. The Node client keeps its store and keys under
- * `~/.miden/stores/<PORT0_STORE>/`, so a re-run resumes from that state,
- * and an already-deployed registry is reported and left alone.
+ * Builds the registry through the SDK's own `createRegistryAccount`, funds it
+ * from the operator with a note, and consumes that note as its first transaction.
+ * A stored registry is reused when it accepts this build's pool code, prices its
+ * notes, and carries the configured policy; otherwise a new one is deployed.
+ * `PORT0_NEW_REGISTRY=1` forces a new one.
  *
- * Every value that becomes registry policy or identifies an account is
- * **required**: none of them has a default, because a wrong value here is
- * permanent for that registry. Before spending anything the script prints them
- * and asks the deployer to confirm, either by typing `deploy` or by passing
- * `--yes` for an unattended run.
- *
- * Environment (from the environment or a `.env` file in the current directory):
- *   PORT0_FEE_FAUCET_ID         required, chain fee faucet
- *   PORT0_POOL_COMMITMENT       required, from `npm run pool:commitment`
- *   PORT0_OPERATOR              required, the keyed account that funds the registry
- *   PORT0_REGISTRY_ADMIN        required, the account allowed to change the register fee
- *   PORT0_REGISTER_FEE          required, register note price in base units
- *   PORT0_PROTOCOL_FEE_TO       required, account that receives every pool's protocol fees
- *   PORT0_PROTOCOL_FEE_SHARE_BPS required, protocol share of the LP fee, in bps
- *   PORT0_LP_FEE_TIERS          required, comma-separated LP fee tiers in bps
- *   PORT0_STORE                 required, client store holding the operator's key
- *   MIDEN_RPC_URL               required, node RPC endpoint
- *   PORT0_PROVER                required, prover (or `testnet`)
- *   PORT0_NOTE_TRANSPORT        required, note transport (or `testnet`)
- *   PORT0_FUND                  default 1000, base units sent to the registry
- *   PORT0_WAIT_SECS             default 600, funding wait timeout
- *
- * `PORT0_NEW_REGISTRY=1` deploys another registry even when a stored one matches
- * the configured policy. Without it, a matching registry is reused, and a
- * registry whose permanent values differ is reported and replaced. An environment
- * variable rather than a flag because `npm run registry:deploy --new` is consumed
- * by npm itself; `npm run registry:deploy -- --new` works too.
- *
- * The admin is the only account that can ever change the register fee, and it
- * cannot be changed afterwards: it belongs to an account the deployer keeps, not
- * to the throwaway operator that funds the deployment.
- *
- * Run: npm run build && node scripts/deploy-registry.mjs [--yes]
+ * Prints every permanent value and waits for the deployer to type `deploy`, or
+ * `--yes` for an unattended run. Reads the variables documented in
+ * `.env.example`; each is required unless that file shows a default.
  */
 import { existsSync } from "node:fs";
 import {
@@ -65,6 +29,7 @@ import {
   noteScript,
   p2idRoot,
   poolAuthRoots,
+  poolCodeCommitment,
   readRegistryAcceptedCodeCommitments,
   wasmModule,
 } from "../dist/index.js";
@@ -142,6 +107,10 @@ async function main() {
 
   // Which registry this run touches is part of what the deployer confirms, so it
   // is resolved before the prompt. A forced new registry is reported as such.
+  // Both pinned values are checked before anything is spent, and the block below
+  // reports them as verified.
+  const pinned = await verifyPinnedValues(client, config);
+
   const existing = config.forceNew
     ? null
     : await findRegistry(client, accounts, operator, config);
@@ -163,6 +132,7 @@ async function main() {
     protocolFeeShareBps,
     allowedLpFeeBps,
     fundAmount,
+    pinned,
     reuseOf: existing ? existing.id().toString() : null,
   });
 
@@ -248,7 +218,7 @@ async function confirmPolicy(policy) {
     id.toBech32(NetworkId.testnet(), AccountInterface.BasicWallet);
   const lines = [
     ["registry, permanent", ""],
-    ["  pool code commitment", policy.poolCommitment],
+    ["  pool code commitment", `${policy.poolCommitment}  (matches this build)`],
     ["  protocol fee recipient", `${policy.protocolFeeTo.toString()}  ${address(policy.protocolFeeTo)}`],
     ["  protocol share of LP fee", `${policy.protocolFeeShareBps} bps`],
     ["  LP fee tiers", policy.allowedLpFeeBps.map((tier) => `${tier}`).join(", ") + " bps"],
@@ -263,7 +233,7 @@ async function confirmPolicy(policy) {
     ["deployment", ""],
     ["  operator (funds it, throwaway)", `${policy.operator.id().toString()}  ${address(policy.operator.id())}`],
     ["  funding sent to registry", `${policy.fundAmount} base units`],
-    ["  fee faucet", policy.feeFaucet.toString()],
+    ["  fee faucet", `${policy.feeFaucet.toString()}  (matches the chain)`],
     ["  client store", policy.storeName],
     ["  rpc / prover / transport", `${policy.rpcUrl}  ${policy.proverUrl}  ${policy.noteTransportUrl}`],
   ];
@@ -297,6 +267,54 @@ async function confirmPolicy(policy) {
   } finally {
     prompt.close();
   }
+}
+
+/**
+ * Parameters for the throwaway pool this script builds twice over: once to read
+ * the auth roots a registry pins, and once to verify the pinned code commitment
+ * against the artifacts in this build. Storage and ids do not affect either.
+ */
+function referencePool(config) {
+  return {
+    token0Key: [1n, 2n, 3n, 4n],
+    token1Key: [5n, 6n, 7n, 8n],
+    token0Symbol: "ALPHA",
+    token1Symbol: "BETA",
+    registryId: AccountId.fromHex(config.feeFaucetId),
+    lpFeeBps: 30n,
+    protocolFeeShareBps: config.protocolFeeShareBps,
+    feeFaucetId: config.feeFaucetId,
+  };
+}
+
+/**
+ * Verifies the two configured values that duplicate something verifiable.
+ *
+ * `PORT0_FEE_FAUCET_ID` duplicates the chain's own fee faucet, which the client
+ * reports after its first sync. `PORT0_POOL_COMMITMENT` duplicates what this
+ * build produces, and it goes stale whenever a contract changes. Both are
+ * permanent registry inputs, so a stale copy is not a retry, it is a registry
+ * that accepts no pool or charges in the wrong asset.
+ */
+async function verifyPinnedValues(client, config) {
+  const chainFeeFaucet = await client.feeFaucetId();
+  const chainFeeFaucetId = chainFeeFaucet.toString();
+  if (chainFeeFaucetId.toLowerCase() !== config.feeFaucetId.toLowerCase()) {
+    throw new Error(
+      `PORT0_FEE_FAUCET_ID is ${config.feeFaucetId} but the chain reports ` +
+        `${chainFeeFaucetId} as its fee faucet. The value seeds the registry's fee ` +
+        "policy and cannot be changed afterwards.",
+    );
+  }
+  const built = await poolCodeCommitment(client, referencePool(config));
+  if (built.toLowerCase() !== config.poolCommitment.toLowerCase()) {
+    throw new Error(
+      `PORT0_POOL_COMMITMENT is ${config.poolCommitment} but this build produces ` +
+        `${built}. Run \`npm run pool:commitment\` and use the value it prints; the ` +
+        "registry would otherwise accept no pool.",
+    );
+  }
+  return { chainFeeFaucetId, built };
 }
 
 function required(name) {
@@ -471,18 +489,7 @@ async function createRegistryFor(client, config) {
   // The auth roots every pool must carry, read from a reference pool build:
   // the registry compares them on every registration, so a pool with an
   // allowlist of its own cannot be listed.
-  const authRoots = await poolAuthRoots(client, {
-    token0Key: [1n, 2n, 3n, 4n],
-    token1Key: [5n, 6n, 7n, 8n],
-    token0Symbol: "ALPHA",
-    token1Symbol: "BETA",
-    // Any account id satisfies the builder here; storage does not affect the
-    // code commitment or the auth roots this reads.
-    registryId: AccountId.fromHex(config.feeFaucetId),
-    lpFeeBps: 30n,
-    protocolFeeShareBps: config.protocolFeeShareBps,
-    feeFaucetId: config.feeFaucetId,
-  });
+  const authRoots = await poolAuthRoots(client, referencePool(config));
   return createRegistryAccount(client, {
     acceptedPoolCodeCommitment: config.poolCommitment,
     admin: config.admin,

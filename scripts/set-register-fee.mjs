@@ -1,22 +1,13 @@
 #!/usr/bin/env node
 /**
- * Sets the registry's register fee, the price of listing a pool.
+ * Sets the registry's register fee.
  *
  *   node scripts/set-register-fee.mjs <base-units> [--submit]
  *
- * Dry run by default: it reads the live fee and reports the change. `--submit`
- * emits the registry-config note, which the node consumes on the registry. The
- * registry only accepts that note from the admin it was created with, so the
- * caller account must be that admin.
- *
- * Environment (from the environment or a `.env` file in this directory):
- *   PORT0_REGISTRY_ID    required
- *   MIDEN_RPC_URL        default https://rpc.testnet.miden.io
- *   PORT0_PROVER         default testnet
- *   PORT0_STORE          default port0-registry, must hold the admin's key
- *   PORT0_OPERATOR       optional, admin account id; defaults to the first
- *                        non-network account in the store
- *   PORT0_WAIT_SECS      default 300, how long to wait for the price to change
+ * Reports the live fee, then with `--submit` emits the registry-config note. The
+ * registry accepts it only from its admin. Reads `PORT0_REGISTRY_ID`,
+ * `PORT0_OPERATOR`, `PORT0_STORE`, `MIDEN_RPC_URL`, `PORT0_PROVER`,
+ * `PORT0_NOTE_TRANSPORT`, `PORT0_WAIT_SECS`.
  */
 import { existsSync } from "node:fs";
 import { AccountId, MidenClient } from "@miden-sdk/miden-sdk";
