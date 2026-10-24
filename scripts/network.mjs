@@ -24,8 +24,17 @@ const CHAINS = {
  * `.env.testnet` and `.env.mainnet` and a run names the one it means.
  */
 export function loadEnvironment() {
-  const file = process.env.PORT0_ENV_FILE ?? ".env";
-  if (existsSync(file)) process.loadEnvFile(file);
+  const named = process.env.PORT0_ENV_FILE;
+  const file = named ?? ".env";
+  if (existsSync(file)) {
+    process.loadEnvFile(file);
+    return;
+  }
+  // A named file that is absent would leave every variable unset and surface as
+  // an unrelated "is required" error.
+  if (named) {
+    throw new Error(`PORT0_ENV_FILE is ${named}, which does not exist`);
+  }
 }
 
 /**
