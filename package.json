@@ -59,7 +59,8 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run generate && npm run typecheck && npm test && npm run build",
     "fees:collect": "npm run build && node scripts/collect-fees.mjs",
-    "registry:set-fee": "npm run build && node scripts/set-register-fee.mjs"
+    "registry:set-fee": "npm run build && node scripts/set-register-fee.mjs",
+    "preflight": "npm run generate && npm run build && node scripts/preflight.mjs"
   },
   "peerDependencies": {
     "@miden-sdk/miden-sdk": "^0.17.6"

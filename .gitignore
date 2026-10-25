@@ -8,3 +8,4 @@ target/
 .env
 .env.*
 !.env.example
+preflight-mainnet.json

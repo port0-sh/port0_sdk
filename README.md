@@ -306,6 +306,10 @@ tooling in `scripts/`. They read the variables documented in `.env.example`, fro
 `.env` or from the file named by `PORT0_ENV_FILE`, so one checkout can serve several
 chains with `.env.testnet` and `.env.mainnet`.
 
+`preflight` is separate from those: it verifies a deployment end to end against a
+registry it creates for the run. `PREFLIGHT.md` states what it covers, what it
+spends, and what it deliberately leaves out.
+
 Each chain needs its own `PORT0_STORE`: one client store cannot hold accounts from
 two chains, since the same account id can exist on both with different state. The
 scripts stamp a store with the chain it first ran against and refuse to open it for
